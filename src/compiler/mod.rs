@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, Stmt, BinaryOp, UnaryOp};
+use crate::ast::{Expr, Program, Stmt, BinaryOp, UnaryOp, Parameter};
 use crate::bytecode::{Chunk, OpCode, Value, Function};
 use std::collections::HashMap;
 
@@ -67,7 +67,7 @@ impl Compiler {
                 self.emit(OpCode::Pop, 0);
             }
 
-            Stmt::VarDeclaration { name, mutable, initializer } => {
+            Stmt::VarDeclaration { name, mutable, type_annotation: _, initializer } => {
                 if let Some(init) = initializer {
                     self.compile_expression(init)?;
                 } else {
@@ -85,8 +85,8 @@ impl Compiler {
                 }
             }
 
-            Stmt::FnDeclaration { name, parameters, body } => {
-                let function = self.compile_function(name.clone(), parameters, body)?;
+            Stmt::FnDeclaration { name, parameters, return_type: _, body } => {
+                let function = self.compile_function(name.clone(), &parameters, body)?;
                 let idx = self.chunk.add_constant(Value::Function(function));
                 self.emit(OpCode::LoadConst(idx), 0);
                 
@@ -348,15 +348,15 @@ impl Compiler {
     fn compile_function(
         &mut self,
         name: String,
-        parameters: Vec<String>,
+        parameters: &[Parameter],
         body: Vec<Stmt>,
     ) -> CompileResult<Function> {
         let mut function_compiler = Compiler::new();
         function_compiler.begin_scope();
         
         // 添加参数为局部变量
-        for param in &parameters {
-            function_compiler.add_local(param.clone(), false)?;
+        for param in parameters {
+            function_compiler.add_local(param.name.clone(), false)?;
         }
         
         // 编译函数体

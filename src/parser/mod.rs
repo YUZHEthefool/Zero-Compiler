@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, Expr, Program, Stmt, UnaryOp};
+use crate::ast::{BinaryOp, Expr, Program, Stmt, UnaryOp, Type, Parameter};
 use crate::lexer::token::{Token, TokenType};
 
 pub struct Parser {
@@ -96,6 +96,13 @@ impl Parser {
         let name_token = self.consume(TokenType::Identifier, "Expected variable name")?;
         let name = name_token.value.clone();
 
+        // 解析可选的类型注解
+        let type_annotation = if self.match_token(&[TokenType::Colon]) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
         let initializer = if self.match_token(&[TokenType::Equal]) {
             Some(self.expression()?)
         } else {
@@ -107,6 +114,7 @@ impl Parser {
         Ok(Stmt::VarDeclaration {
             name,
             mutable: is_mutable,
+            type_annotation,
             initializer,
         })
     }
@@ -120,8 +128,19 @@ impl Parser {
         let mut parameters = Vec::new();
         if !self.check(TokenType::RightParen) {
             loop {
-                let param = self.consume(TokenType::Identifier, "Expected parameter name")?;
-                parameters.push(param.value.clone());
+                let param_name = self.consume(TokenType::Identifier, "Expected parameter name")?;
+                
+                // 解析可选的类型注解
+                let type_annotation = if self.match_token(&[TokenType::Colon]) {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                
+                parameters.push(Parameter {
+                    name: param_name.value.clone(),
+                    type_annotation,
+                });
 
                 if !self.match_token(&[TokenType::Comma]) {
                     break;
@@ -130,6 +149,14 @@ impl Parser {
         }
 
         self.consume(TokenType::RightParen, "Expected ')' after parameters")?;
+        
+        // 解析可选的返回类型
+        let return_type = if self.match_token(&[TokenType::Arrow]) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+        
         self.consume(TokenType::LeftBrace, "Expected '{' before function body")?;
 
         let mut body = Vec::new();
@@ -142,8 +169,43 @@ impl Parser {
         Ok(Stmt::FnDeclaration {
             name,
             parameters,
+            return_type,
             body,
         })
+    }
+    
+    fn parse_type(&mut self) -> ParseResult<Type> {
+        let token = self.current_token();
+        match token.token_type {
+            TokenType::Int => {
+                self.advance();
+                Ok(Type::Int)
+            }
+            TokenType::Float64 => {
+                self.advance();
+                Ok(Type::Float)
+            }
+            TokenType::String64 => {
+                self.advance();
+                Ok(Type::String)
+            }
+            TokenType::Bool => {
+                self.advance();
+                Ok(Type::Bool)
+            }
+            TokenType::Void => {
+                self.advance();
+                Ok(Type::Void)
+            }
+            TokenType::Null => {
+                self.advance();
+                Ok(Type::Null)
+            }
+            _ => Err(ParseError::UnexpectedToken {
+                expected: "type name".to_string(),
+                found: token.token_type.clone(),
+            }),
+        }
     }
 
     fn statement(&mut self) -> ParseResult<Stmt> {

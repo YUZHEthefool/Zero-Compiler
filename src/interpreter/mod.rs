@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, Expr, Program, Stmt, UnaryOp};
+use crate::ast::{BinaryOp, Expr, Program, Stmt, UnaryOp, Parameter};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -8,7 +8,7 @@ pub enum Value {
     String(String),
     Boolean(bool),
     Function {
-        parameters: Vec<String>,
+        parameters: Vec<Parameter>,
         body: Vec<Stmt>,
     },
     Null,
@@ -118,6 +118,7 @@ impl Interpreter {
             Stmt::VarDeclaration {
                 name,
                 mutable: _,
+                type_annotation: _,
                 initializer,
             } => {
                 let value = if let Some(init) = initializer {
@@ -132,6 +133,7 @@ impl Interpreter {
             Stmt::FnDeclaration {
                 name,
                 parameters,
+                return_type: _,
                 body,
             } => {
                 let func = Value::Function {
@@ -403,7 +405,7 @@ impl Interpreter {
 
             for (param, arg) in parameters.iter().zip(arguments.iter()) {
                 let arg_value = self.evaluate_expression(arg)?;
-                self.environment.define(param.clone(), arg_value);
+                self.environment.define(param.name.clone(), arg_value);
             }
 
             let result = match self.execute_function_body(&body) {

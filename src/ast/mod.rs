@@ -1,5 +1,44 @@
 use crate::lexer::token::Token;
 
+// 类型系统定义
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Type {
+    Int,
+    Float,
+    String,
+    Bool,
+    Void,
+    Null,
+    Function(FunctionType),
+    Unknown,  // 用于类型推导
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FunctionType {
+    pub params: Vec<Type>,
+    pub return_type: Box<Type>,
+}
+
+// 函数参数定义
+#[derive(Debug, Clone, PartialEq)]
+pub struct Parameter {
+    pub name: String,
+    pub type_annotation: Option<Type>,
+}
+
+impl Type {
+    pub fn is_numeric(&self) -> bool {
+        matches!(self, Type::Int | Type::Float)
+    }
+    
+    pub fn is_compatible_with(&self, other: &Type) -> bool {
+        self == other ||
+        (self.is_numeric() && other.is_numeric()) ||
+        matches!(self, Type::Unknown) ||
+        matches!(other, Type::Unknown)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     // 字面量
@@ -78,13 +117,15 @@ pub enum Stmt {
     VarDeclaration {
         name: String,
         mutable: bool,
+        type_annotation: Option<Type>,
         initializer: Option<Expr>,
     },
     
     // 函数声明
     FnDeclaration {
         name: String,
-        parameters: Vec<String>,
+        parameters: Vec<Parameter>,
+        return_type: Option<Type>,
         body: Vec<Stmt>,
     },
     

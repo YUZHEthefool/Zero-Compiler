@@ -20,6 +20,14 @@ pub enum TokenType {
     False,
     Print,
     
+    // 类型关键字
+    Int,
+    Float64,
+    String64,
+    Bool,
+    Void,
+    Null,
+    
     // 运算符
     Plus,       // +
     Minus,      // -
@@ -53,6 +61,7 @@ pub enum TokenType {
     Colon,          // :
     Dot,            // .
     DotDot,         // ..
+    Arrow,          // ->
     
     // 特殊
     EOF,
@@ -74,6 +83,13 @@ impl TokenType {
             "true" => Some(TokenType::True),
             "false" => Some(TokenType::False),
             "print" => Some(TokenType::Print),
+            // 类型关键字
+            "int" => Some(TokenType::Int),
+            "float" => Some(TokenType::Float64),
+            "string" => Some(TokenType::String64),
+            "bool" => Some(TokenType::Bool),
+            "void" => Some(TokenType::Void),
+            "null" => Some(TokenType::Null),
             _ => None,
         }
     }

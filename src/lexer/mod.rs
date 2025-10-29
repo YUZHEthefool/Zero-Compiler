@@ -137,7 +137,14 @@ impl Lexer {
 
                 let token = match ch {
                     '+' => Token::new(TokenType::Plus, ch.to_string()),
-                    '-' => Token::new(TokenType::Minus, ch.to_string()),
+                    '-' => {
+                        if self.peek(1) == Some('>') {
+                            self.advance();
+                            Token::new(TokenType::Arrow, "->".to_string())
+                        } else {
+                            Token::new(TokenType::Minus, ch.to_string())
+                        }
+                    }
                     '*' => Token::new(TokenType::Star, ch.to_string()),
                     '/' => Token::new(TokenType::Slash, ch.to_string()),
                     '%' => Token::new(TokenType::Percent, ch.to_string()),

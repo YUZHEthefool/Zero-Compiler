@@ -4,6 +4,7 @@ mod ast;
 mod bytecode;
 mod compiler;
 mod vm;
+mod type_checker;
 
 // 保留旧的解释器用于对比
 mod interpreter;
@@ -12,6 +13,7 @@ use lexer::Lexer;
 use parser::Parser;
 use compiler::Compiler;
 use vm::VM;
+use type_checker::TypeChecker;
 use std::env;
 use std::fs;
 use std::process;
@@ -60,6 +62,13 @@ fn run(source: &str) {
             process::exit(1);
         }
     };
+
+    // 类型检查
+    let mut type_checker = TypeChecker::new();
+    if let Err(err) = type_checker.check(&program) {
+        eprintln!("Type error: {:?}", err);
+        process::exit(1);
+    }
 
     // 编译为字节码
     let mut compiler = Compiler::new();
@@ -186,4 +195,47 @@ mod tests {
         "#;
         run(source);
     }
+
+    #[test]
+    fn test_type_annotations() {
+        let source = r#"
+            let x: int = 42;
+            let y: float = 3.14;
+            let s: string = "hello";
+            let b: bool = true;
+            print(x);
+            print(y);
+            print(s);
+            print(b);
+        "#;
+        run(source);
+    }
+
+    #[test]
+    fn test_typed_function() {
+        let source = r#"
+            fn add(a: int, b: int) {
+                return a + b;
+            }
+            
+            let result = add(10, 20);
+            print(result);
+        "#;
+        run(source);
+    }
+
+    #[test]
+    fn test_mixed_type_annotations() {
+        let source = r#"
+            fn multiply(a, b: int) {
+                return a * b;
+            }
+            
+            let x = 5;
+            let result = multiply(x, 10);
+            print(result);
+        "#;
+        run(source);
+    }
+
 }
