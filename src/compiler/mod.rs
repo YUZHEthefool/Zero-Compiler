@@ -335,9 +335,31 @@ impl Compiler {
                 self.emit(OpCode::Call(arguments.len()), 0);
             }
 
-            Expr::Index { object: _, index: _ } => {
-                // 数组/索引操作暂未实现
-                todo!("Index operations not yet implemented in bytecode compiler");
+            Expr::Array { elements } => {
+                // 编译每个数组元素
+                let len = elements.len();
+                for element in elements {
+                    self.compile_expression(element)?;
+                }
+                // 创建数组（栈上的元素会被收集到数组中）
+                self.emit(OpCode::NewArray(len), 0);
+            }
+
+            Expr::Index { object, index } => {
+                // 编译数组和索引表达式
+                self.compile_expression(*object)?;
+                self.compile_expression(*index)?;
+                // 执行数组索引访问
+                self.emit(OpCode::ArrayGet, 0);
+            }
+            
+            Expr::IndexAssign { object, index, value } => {
+                // 编译数组、索引和值表达式
+                self.compile_expression(*object)?;
+                self.compile_expression(*index)?;
+                self.compile_expression(*value)?;
+                // 执行数组索引赋值
+                self.emit(OpCode::ArraySet, 0);
             }
         }
 

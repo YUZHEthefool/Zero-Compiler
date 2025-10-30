@@ -328,6 +328,94 @@ impl VM {
                     self.push(value)?;
                 }
 
+                // 数组操作
+                OpCode::NewArray(size) => {
+                    let mut elements = Vec::with_capacity(size);
+                    // 从栈中弹出元素（注意顺序）
+                    for _ in 0..size {
+                        elements.push(self.pop()?);
+                    }
+                    // 反转以保持正确顺序
+                    elements.reverse();
+                    self.push(Value::Array(elements))?;
+                }
+
+                OpCode::ArrayGet => {
+                    let index = self.pop()?;
+                    let array = self.pop()?;
+                    
+                    let idx = match index {
+                        Value::Integer(i) => i,
+                        _ => return Err(VMError::TypeError("Array index must be an integer".to_string())),
+                    };
+                    
+                    match array {
+                        Value::Array(arr) => {
+                            let actual_idx = if idx < 0 {
+                                // 负索引：从末尾访问
+                                let len = arr.len() as i64;
+                                (len + idx) as usize
+                            } else {
+                                idx as usize
+                            };
+                            
+                            if actual_idx >= arr.len() {
+                                return Err(VMError::InvalidOperation(
+                                    format!("Array index {} out of bounds (length: {})", idx, arr.len())
+                                ));
+                            }
+                            
+                            self.push(arr[actual_idx].clone())?;
+                        }
+                        _ => return Err(VMError::TypeError("Can only index arrays".to_string())),
+                    }
+                }
+
+                OpCode::ArraySet => {
+                    let value = self.pop()?;
+                    let index = self.pop()?;
+                    let array = self.pop()?;
+                    
+                    let idx = match index {
+                        Value::Integer(i) => i,
+                        _ => return Err(VMError::TypeError("Array index must be an integer".to_string())),
+                    };
+                    
+                    // 我们需要可变引用来修改数组
+                    // 但由于所有权问题，这里需要重新构建数组
+                    match array {
+                        Value::Array(mut arr) => {
+                            let actual_idx = if idx < 0 {
+                                let len = arr.len() as i64;
+                                (len + idx) as usize
+                            } else {
+                                idx as usize
+                            };
+                            
+                            if actual_idx >= arr.len() {
+                                return Err(VMError::InvalidOperation(
+                                    format!("Array index {} out of bounds (length: {})", idx, arr.len())
+                                ));
+                            }
+                            
+                            arr[actual_idx] = value.clone();
+                            self.push(Value::Array(arr))?;
+                            self.push(value)?; // 返回被赋的值
+                        }
+                        _ => return Err(VMError::TypeError("Can only index arrays".to_string())),
+                    }
+                }
+
+                OpCode::ArrayLen => {
+                    let array = self.pop()?;
+                    match array {
+                        Value::Array(arr) => {
+                            self.push(Value::Integer(arr.len() as i64))?;
+                        }
+                        _ => return Err(VMError::TypeError("Can only get length of arrays".to_string())),
+                    }
+                }
+
                 // 其他
                 OpCode::Print => {
                     let value = self.pop()?;

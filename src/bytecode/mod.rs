@@ -42,6 +42,12 @@ pub enum OpCode {
     Call(usize),           // 函数调用（参数数量）
     Return,                // 返回
     
+    // 数组操作
+    NewArray(usize),       // 创建新数组（参数：元素数量）
+    ArrayGet,              // 获取数组元素 (array, index -> value)
+    ArraySet,              // 设置数组元素 (array, index, value -> value)
+    ArrayLen,              // 获取数组长度 (array -> length)
+    
     // 栈操作
     Pop,                   // 弹出栈顶
     Dup,                   // 复制栈顶
@@ -58,6 +64,7 @@ pub enum Value {
     Float(f64),
     String(String),
     Boolean(bool),
+    Array(Vec<Value>),     // 数组值
     Function(Function),
     Null,
 }
@@ -69,6 +76,10 @@ impl Value {
             Value::Float(f) => f.to_string(),
             Value::String(s) => s.clone(),
             Value::Boolean(b) => b.to_string(),
+            Value::Array(arr) => {
+                let elements: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
+                format!("[{}]", elements.join(", "))
+            }
             Value::Function(_) => "<function>".to_string(),
             Value::Null => "null".to_string(),
         }
@@ -80,6 +91,7 @@ impl Value {
             Value::Null => false,
             Value::Integer(0) => false,
             Value::Float(f) if *f == 0.0 => false,
+            Value::Array(arr) => !arr.is_empty(),
             _ => true,
         }
     }
@@ -95,6 +107,20 @@ impl Value {
         match self {
             Value::Float(f) => Some(*f),
             Value::Integer(i) => Some(*i as f64),
+            _ => None,
+        }
+    }
+    
+    pub fn as_array(&self) -> Option<&Vec<Value>> {
+        match self {
+            Value::Array(arr) => Some(arr),
+            _ => None,
+        }
+    }
+    
+    pub fn as_array_mut(&mut self) -> Option<&mut Vec<Value>> {
+        match self {
+            Value::Array(arr) => Some(arr),
             _ => None,
         }
     }
@@ -173,6 +199,7 @@ impl Chunk {
             OpCode::JumpIfTrue(offset) => println!("JumpIfTrue -> {}", offset),
             OpCode::Loop(offset) => println!("Loop -> {}", offset),
             OpCode::Call(arity) => println!("Call({})", arity),
+            OpCode::NewArray(size) => println!("NewArray({})", size),
             _ => println!("{:?}", op),
         }
     }

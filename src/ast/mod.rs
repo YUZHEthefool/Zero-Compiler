@@ -9,6 +9,7 @@ pub enum Type {
     Bool,
     Void,
     Null,
+    Array(Box<Type>),  // 数组类型
     Function(FunctionType),
     Unknown,  // 用于类型推导
 }
@@ -32,10 +33,24 @@ impl Type {
     }
     
     pub fn is_compatible_with(&self, other: &Type) -> bool {
-        self == other ||
-        (self.is_numeric() && other.is_numeric()) ||
-        matches!(self, Type::Unknown) ||
-        matches!(other, Type::Unknown)
+        match (self, other) {
+            // 相同类型
+            (a, b) if a == b => true,
+            // 数字类型之间兼容
+            (a, b) if a.is_numeric() && b.is_numeric() => true,
+            // Unknown类型与任何类型兼容
+            (Type::Unknown, _) | (_, Type::Unknown) => true,
+            // 数组类型需要元素类型兼容
+            (Type::Array(a), Type::Array(b)) => a.is_compatible_with(b),
+            _ => false,
+        }
+    }
+    
+    pub fn get_element_type(&self) -> Option<&Type> {
+        match self {
+            Type::Array(element_type) => Some(element_type),
+            _ => None,
+        }
     }
 }
 
@@ -47,6 +62,11 @@ pub enum Expr {
     String(String),
     Boolean(bool),
     Identifier(String),
+    
+    // 数组字面量
+    Array {
+        elements: Vec<Expr>,
+    },
     
     // 二元运算
     Binary {
@@ -71,6 +91,13 @@ pub enum Expr {
     Index {
         object: Box<Expr>,
         index: Box<Expr>,
+    },
+    
+    // 索引赋值
+    IndexAssign {
+        object: Box<Expr>,
+        index: Box<Expr>,
+        value: Box<Expr>,
     },
     
     // 赋值
@@ -211,6 +238,10 @@ impl Expr {
         Expr::Identifier(name)
     }
     
+    pub fn array(elements: Vec<Expr>) -> Self {
+        Expr::Array { elements }
+    }
+    
     pub fn binary(left: Expr, operator: BinaryOp, right: Expr) -> Self {
         Expr::Binary {
             left: Box::new(left),
@@ -237,6 +268,14 @@ impl Expr {
         Expr::Index {
             object: Box::new(object),
             index: Box::new(index),
+        }
+    }
+    
+    pub fn index_assign(object: Expr, index: Expr, value: Expr) -> Self {
+        Expr::IndexAssign {
+            object: Box::new(object),
+            index: Box::new(index),
+            value: Box::new(value),
         }
     }
     

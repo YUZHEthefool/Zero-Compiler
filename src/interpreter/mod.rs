@@ -254,10 +254,25 @@ impl Interpreter {
                 Ok(val)
             }
 
+            Expr::Array { elements } => {
+                // 数组字面量 - 暂时返回占位值
+                // TODO: 实现完整的数组支持
+                Ok(Value::String(format!("Array[{}]", elements.len())))
+            }
+
             Expr::Index { object, index } => {
+                // 数组索引 - 暂时返回占位值
+                // TODO: 实现完整的数组索引支持
                 Err(RuntimeError::InvalidOperation(
                     "Array indexing not yet implemented".to_string(),
                 ))
+            }
+            
+            Expr::IndexAssign { object, index, value } => {
+                // 数组索引赋值 - 暂时返回占位值
+                // TODO: 实现完整的数组索引赋值支持
+                let val = self.evaluate_expression(value)?;
+                Ok(val)
             }
         }
     }

@@ -175,6 +175,14 @@ impl Parser {
     }
     
     fn parse_type(&mut self) -> ParseResult<Type> {
+        // 检查数组类型 [element_type]
+        if self.check(TokenType::LeftBracket) {
+            self.advance(); // 消费 '['
+            let element_type = self.parse_type()?;
+            self.consume(TokenType::RightBracket, "Expected ']' after array element type")?;
+            return Ok(Type::Array(Box::new(element_type)));
+        }
+        
         let token = self.current_token();
         match token.token_type {
             TokenType::Int => {
@@ -350,9 +358,16 @@ impl Parser {
         let expr = self.or()?;
 
         if self.match_token(&[TokenType::Equal]) {
-            if let Expr::Identifier(name) = expr {
-                let value = self.assignment()?;
-                return Ok(Expr::assign(name, value));
+            match expr {
+                Expr::Identifier(name) => {
+                    let value = self.assignment()?;
+                    return Ok(Expr::assign(name, value));
+                }
+                Expr::Index { object, index } => {
+                    let value = self.assignment()?;
+                    return Ok(Expr::index_assign(*object, *index, value));
+                }
+                _ => {}
             }
         }
 
@@ -550,6 +565,24 @@ impl Parser {
             let expr = self.expression()?;
             self.consume(TokenType::RightParen, "Expected ')' after expression")?;
             return Ok(expr);
+        }
+
+        // 数组字面量 [elem1, elem2, ...]
+        if self.match_token(&[TokenType::LeftBracket]) {
+            let mut elements = Vec::new();
+            
+            if !self.check(TokenType::RightBracket) {
+                loop {
+                    elements.push(self.expression()?);
+                    
+                    if !self.match_token(&[TokenType::Comma]) {
+                        break;
+                    }
+                }
+            }
+            
+            self.consume(TokenType::RightBracket, "Expected ']' after array elements")?;
+            return Ok(Expr::array(elements));
         }
 
         Err(ParseError::InvalidExpression)

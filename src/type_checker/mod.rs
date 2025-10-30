@@ -500,9 +500,77 @@ impl TypeChecker {
                 }
             }
 
-            Expr::Index { .. } => {
-                // 数组索引暂未实现
-                Ok(Type::Unknown)
+            Expr::Array { elements } => {
+                if elements.is_empty() {
+                    // 空数组需要类型注解，这里返回Unknown
+                    Ok(Type::Unknown)
+                } else {
+                    // 推断数组元素类型（所有元素必须同类型）
+                    let first_type = self.infer_type(&elements[0])?;
+                    
+                    for elem in elements.iter().skip(1) {
+                        let elem_type = self.infer_type(elem)?;
+                        // 数组要求严格的类型匹配，不允许类型自动转换
+                        if first_type != elem_type && elem_type != Type::Unknown && first_type != Type::Unknown {
+                            return Err(TypeError::TypeMismatch {
+                                expected: first_type,
+                                found: elem_type,
+                                location: "array literal".to_string(),
+                            });
+                        }
+                    }
+                    
+                    Ok(Type::Array(Box::new(first_type)))
+                }
+            }
+
+            Expr::Index { object, index } => {
+                let obj_type = self.infer_type(object)?;
+                let idx_type = self.infer_type(index)?;
+                
+                // 索引必须是整数
+                if idx_type != Type::Int && idx_type != Type::Unknown {
+                    return Err(TypeError::TypeMismatch {
+                        expected: Type::Int,
+                        found: idx_type,
+                        location: "array index".to_string(),
+                    });
+                }
+                
+                // 返回数组元素类型
+                if let Some(element_type) = obj_type.get_element_type() {
+                    Ok(element_type.clone())
+                } else {
+                    Ok(Type::Unknown)
+                }
+            }
+            
+            Expr::IndexAssign { object, index, value } => {
+                let obj_type = self.infer_type(object)?;
+                let idx_type = self.infer_type(index)?;
+                let val_type = self.infer_type(value)?;
+                
+                // 索引必须是整数
+                if idx_type != Type::Int && idx_type != Type::Unknown {
+                    return Err(TypeError::TypeMismatch {
+                        expected: Type::Int,
+                        found: idx_type,
+                        location: "array index".to_string(),
+                    });
+                }
+                
+                // 值类型必须与数组元素类型兼容
+                if let Some(element_type) = obj_type.get_element_type() {
+                    if !element_type.is_compatible_with(&val_type) && val_type != Type::Unknown {
+                        return Err(TypeError::TypeMismatch {
+                            expected: element_type.clone(),
+                            found: val_type,
+                            location: "array element assignment".to_string(),
+                        });
+                    }
+                }
+                
+                Ok(val_type)
             }
         }
     }
