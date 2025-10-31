@@ -1,3 +1,5 @@
+pub mod serializer;
+
 /// Zero语言的字节码指令集
 #[derive(Debug, Clone, PartialEq)]
 pub enum OpCode {
