@@ -1,6 +1,10 @@
 [package]
 name = "Zero-compiler"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+
+[[bin]]
+name = "lexer-cli"
+path = "src/bin/lexer_cli.rs"

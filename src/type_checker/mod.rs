@@ -592,7 +592,7 @@ mod tests {
     fn test_type_check_variable() {
         let input = "let x: int = 42;";
         let mut lexer = Lexer::new(input.to_string());
-        let tokens = lexer.tokenize();
+        let tokens = lexer.tokenize().unwrap();
         let mut parser = Parser::new(tokens);
         let program = parser.parse().unwrap();
 
@@ -604,7 +604,7 @@ mod tests {
     fn test_type_check_type_mismatch() {
         let input = "let x: int = \"hello\";";
         let mut lexer = Lexer::new(input.to_string());
-        let tokens = lexer.tokenize();
+        let tokens = lexer.tokenize().unwrap();
         let mut parser = Parser::new(tokens);
         let program = parser.parse().unwrap();
 
@@ -616,7 +616,7 @@ mod tests {
     fn test_type_check_function() {
         let input = "fn add(a: int, b: int) -> int { return a + b; }";
         let mut lexer = Lexer::new(input.to_string());
-        let tokens = lexer.tokenize();
+        let tokens = lexer.tokenize().unwrap();
         let mut parser = Parser::new(tokens);
         let program = parser.parse().unwrap();
 

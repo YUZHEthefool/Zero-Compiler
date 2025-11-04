@@ -1,5 +1,5 @@
 use crate::ast::{BinaryOp, Expr, Program, Stmt, UnaryOp, Type, Parameter};
-use crate::lexer::token::{Token, TokenType};
+use crate::lexer::token::{Token, TokenType, Position};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -26,13 +26,19 @@ impl Parser {
     fn current_token(&self) -> Token {
         self.tokens.get(self.current)
             .cloned()
-            .unwrap_or_else(|| Token::new(TokenType::EOF, String::new()))
+            .unwrap_or_else(|| {
+                let pos = Position::new(0, 0, 0);
+                Token::new(TokenType::EOF, String::new(), pos.clone(), pos)
+            })
     }
 
     fn peek(&self, offset: usize) -> Token {
         self.tokens.get(self.current + offset)
             .cloned()
-            .unwrap_or_else(|| Token::new(TokenType::EOF, String::new()))
+            .unwrap_or_else(|| {
+                let pos = Position::new(0, 0, 0);
+                Token::new(TokenType::EOF, String::new(), pos.clone(), pos)
+            })
     }
 
     fn advance(&mut self) -> &Token {
@@ -597,7 +603,7 @@ mod tests {
     #[test]
     fn test_parse_variable_declaration() {
         let mut lexer = Lexer::new("let x = 42;".to_string());
-        let tokens = lexer.tokenize();
+        let tokens = lexer.tokenize().unwrap();
         let mut parser = Parser::new(tokens);
         let program = parser.parse().unwrap();
 
@@ -607,7 +613,7 @@ mod tests {
     #[test]
     fn test_parse_function() {
         let mut lexer = Lexer::new("fn add(a, b) { return a + b; }".to_string());
-        let tokens = lexer.tokenize();
+        let tokens = lexer.tokenize().unwrap();
         let mut parser = Parser::new(tokens);
         let program = parser.parse().unwrap();
 
@@ -617,7 +623,7 @@ mod tests {
     #[test]
     fn test_parse_expression() {
         let mut lexer = Lexer::new("2 + 3 * 4;".to_string());
-        let tokens = lexer.tokenize();
+        let tokens = lexer.tokenize().unwrap();
         let mut parser = Parser::new(tokens);
         let program = parser.parse().unwrap();
 

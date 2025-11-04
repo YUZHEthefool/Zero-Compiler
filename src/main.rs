@@ -81,7 +81,13 @@ fn compile_to_bytecode(source: &str, output_file: &str) {
     
     // 词法分析
     let mut lexer = Lexer::new(source.to_string());
-    let tokens = lexer.tokenize();
+    let tokens = match lexer.tokenize() {
+        Ok(t) => t,
+        Err(err) => {
+            eprintln!("Lexer error: {}", err);
+            process::exit(1);
+        }
+    };
 
     // 语法分析
     let mut parser = Parser::new(tokens);
@@ -170,7 +176,13 @@ fn run_bytecode_file(filename: &str) {
 fn run(source: &str) {
     // 词法分析
     let mut lexer = Lexer::new(source.to_string());
-    let tokens = lexer.tokenize();
+    let tokens = match lexer.tokenize() {
+        Ok(t) => t,
+        Err(err) => {
+            eprintln!("Lexer error: {}", err);
+            process::exit(1);
+        }
+    };
 
     // 语法分析
     let mut parser = Parser::new(tokens);
@@ -216,7 +228,13 @@ fn run(source: &str) {
 fn run_old(source: &str) {
     // 词法分析
     let mut lexer = Lexer::new(source.to_string());
-    let tokens = lexer.tokenize();
+    let tokens = match lexer.tokenize() {
+        Ok(t) => t,
+        Err(err) => {
+            eprintln!("Lexer error: {}", err);
+            process::exit(1);
+        }
+    };
 
     // 语法分析
     let mut parser = Parser::new(tokens);
