@@ -5,6 +5,7 @@ mod bytecode;
 mod compiler;
 mod vm;
 mod type_checker;
+mod error;
 
 // 保留旧的解释器用于对比
 mod interpreter;
@@ -15,6 +16,7 @@ use compiler::Compiler;
 use vm::VM;
 use type_checker::TypeChecker;
 use bytecode::serializer::{BytecodeSerializer, BytecodeDeserializer};
+use error::ErrorMode;
 use std::env;
 use std::fs;
 use std::fs::File;
@@ -25,30 +27,40 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: {} <source_file.zero>", args[0]);
-        eprintln!("       {} --old <source_file.zero>  (use old interpreter)", args[0]);
-        eprintln!("       {} --compile <source_file.zero> <output.zbc>  (compile to bytecode)", args[0]);
+        eprintln!("Usage: {} <source_file.zero> [--dtl]", args[0]);
+        eprintln!("       {} --old <source_file.zero> [--dtl]  (use old interpreter)", args[0]);
+        eprintln!("       {} --compile <source_file.zero> <output.zbc> [--dtl]  (compile to bytecode)", args[0]);
         eprintln!("       {} --run <bytecode_file.zbc>  (run bytecode file)", args[0]);
+        eprintln!("");
+        eprintln!("Options:");
+        eprintln!("  --dtl    显示详细的错误信息（包含源码片段和修复建议）");
         process::exit(1);
     }
+
+    // 检查是否有 --dtl 标志
+    let error_mode = if args.contains(&"--dtl".to_string()) {
+        ErrorMode::Detailed
+    } else {
+        ErrorMode::Simple
+    };
 
     match args[1].as_str() {
         "--old" => {
             if args.len() < 3 {
-                eprintln!("Usage: {} --old <source_file.zero>", args[0]);
+                eprintln!("Usage: {} --old <source_file.zero> [--dtl]", args[0]);
                 process::exit(1);
             }
             let source = read_source_file(&args[2]);
             println!("Using old tree-walking interpreter...");
-            run_old(&source);
+            run_old(&source, error_mode);
         }
         "--compile" => {
             if args.len() < 4 {
-                eprintln!("Usage: {} --compile <source_file.zero> <output.zbc>", args[0]);
+                eprintln!("Usage: {} --compile <source_file.zero> <output.zbc> [--dtl]", args[0]);
                 process::exit(1);
             }
             let source = read_source_file(&args[2]);
-            compile_to_bytecode(&source, &args[3]);
+            compile_to_bytecode(&source, &args[3], error_mode);
         }
         "--run" => {
             if args.len() < 3 {
@@ -60,7 +72,7 @@ fn main() {
         _ => {
             let source = read_source_file(&args[1]);
             println!("Using bytecode compiler + VM...");
-            run(&source);
+            run(&source, error_mode);
         }
     }
 }
@@ -76,7 +88,7 @@ fn read_source_file(filename: &str) -> String {
 }
 
 /// 编译源代码到字节码文件
-fn compile_to_bytecode(source: &str, output_file: &str) {
+fn compile_to_bytecode(source: &str, output_file: &str, error_mode: ErrorMode) {
     println!("Compiling {} to {}...", "source", output_file);
     
     // 词法分析
@@ -84,7 +96,7 @@ fn compile_to_bytecode(source: &str, output_file: &str) {
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
         Err(err) => {
-            eprintln!("Lexer error: {}", err);
+            eprintln!("{}", err.format(error_mode, Some(source)));
             process::exit(1);
         }
     };
@@ -173,13 +185,13 @@ fn run_bytecode_file(filename: &str) {
 
 
 /// 新的字节码编译器 + VM执行
-fn run(source: &str) {
+fn run(source: &str, error_mode: ErrorMode) {
     // 词法分析
     let mut lexer = Lexer::new(source.to_string());
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
         Err(err) => {
-            eprintln!("Lexer error: {}", err);
+            eprintln!("{}", err.format(error_mode, Some(source)));
             process::exit(1);
         }
     };
@@ -225,13 +237,13 @@ fn run(source: &str) {
 }
 
 /// 旧的树遍历解释器（用于对比）
-fn run_old(source: &str) {
+fn run_old(source: &str, error_mode: ErrorMode) {
     // 词法分析
     let mut lexer = Lexer::new(source.to_string());
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
         Err(err) => {
-            eprintln!("Lexer error: {}", err);
+            eprintln!("{}", err.format(error_mode, Some(source)));
             process::exit(1);
         }
     };
@@ -265,7 +277,7 @@ mod tests {
             let y = 20;
             print(x + y);
         "#;
-        run(source);
+        run(source, ErrorMode::Simple);
     }
 
     #[test]
@@ -278,7 +290,7 @@ mod tests {
             let result = add(5, 3);
             print(result);
         "#;
-        run(source);
+        run(source, ErrorMode::Simple);
     }
 
     #[test]
@@ -290,10 +302,10 @@ mod tests {
         "#;
         
         println!("\n=== Bytecode VM ===");
-        run(source);
+        run(source, ErrorMode::Simple);
         
         println!("\n=== Old Interpreter ===");
-        run_old(source);
+        run_old(source, ErrorMode::Simple);
     }
 
     #[test]
@@ -310,7 +322,7 @@ mod tests {
                 i = i + 1;
             }
         "#;
-        run(source);
+        run(source, ErrorMode::Simple);
     }
 
     #[test]
@@ -330,7 +342,7 @@ mod tests {
             print(multiply(6, 7));
             print(factorial(5));
         "#;
-        run(source);
+        run(source, ErrorMode::Simple);
     }
 
     #[test]
@@ -345,7 +357,7 @@ mod tests {
             print(s);
             print(b);
         "#;
-        run(source);
+        run(source, ErrorMode::Simple);
     }
 
     #[test]
@@ -358,7 +370,7 @@ mod tests {
             let result = add(10, 20);
             print(result);
         "#;
-        run(source);
+        run(source, ErrorMode::Simple);
     }
 
     #[test]
@@ -372,7 +384,7 @@ mod tests {
             let result = multiply(x, 10);
             print(result);
         "#;
-        run(source);
+        run(source, ErrorMode::Simple);
     }
 
 }

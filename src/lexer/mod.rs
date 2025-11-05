@@ -4,40 +4,10 @@ pub mod token_preprocessor;
 
 use token::{Token, TokenType, Position};
 pub use token_preprocessor::{TokenPreprocessor, ScientificNotationAnalyzer, InferredNumericType};
-
-/// 词法分析器错误类型
-#[derive(Debug, Clone)]
-pub enum LexerError {
-    UnterminatedString { line: usize, column: usize },
-    InvalidEscapeSequence { sequence: String, line: usize, column: usize },
-    InvalidUnicodeEscape { sequence: String, line: usize, column: usize },
-    InvalidNumber { value: String, line: usize, column: usize },
-    UnexpectedCharacter { ch: char, line: usize, column: usize },
-}
-
-impl std::fmt::Display for LexerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LexerError::UnterminatedString { line, column } => {
-                write!(f, "未闭合的字符串 at {}:{}", line, column)
-            }
-            LexerError::InvalidEscapeSequence { sequence, line, column } => {
-                write!(f, "无效的转义序列 '{}' at {}:{}", sequence, line, column)
-            }
-            LexerError::InvalidUnicodeEscape { sequence, line, column } => {
-                write!(f, "无效的Unicode转义序列 '{}' at {}:{}", sequence, line, column)
-            }
-            LexerError::InvalidNumber { value, line, column } => {
-                write!(f, "无效的数字 '{}' at {}:{}", value, line, column)
-            }
-            LexerError::UnexpectedCharacter { ch, line, column } => {
-                write!(f, "意外的字符 '{}' at {}:{}", ch, line, column)
-            }
-        }
-    }
-}
-
-impl std::error::Error for LexerError {}
+pub use crate::error::{
+    LexerError, UnterminatedStringError, InvalidEscapeSequenceError,
+    InvalidCharacterError, InvalidNumberError, InvalidUnicodeEscapeError,
+};
 
 pub type LexerResult<T> = Result<T, LexerError>;
 
@@ -224,11 +194,9 @@ impl Lexer {
             }
             
             if value.len() == exp_start {
-                return Err(LexerError::InvalidNumber {
-                    value: value.clone(),
-                    line: start_pos.line,
-                    column: start_pos.column,
-                });
+                return Err(LexerError::InvalidNumber(
+                    InvalidNumberError::new(value.clone(), start_pos.line, start_pos.column, start_pos.offset)
+                ));
             }
         }
 
@@ -260,11 +228,9 @@ impl Lexer {
         }
         
         if value.len() <= 2 {
-            return Err(LexerError::InvalidNumber {
-                value,
-                line: start_pos.line,
-                column: start_pos.column,
-            });
+            return Err(LexerError::InvalidNumber(
+                InvalidNumberError::new(value, start_pos.line, start_pos.column, start_pos.offset)
+            ));
         }
         
         let end_pos = self.current_position();
@@ -285,11 +251,9 @@ impl Lexer {
         }
         
         if value.len() <= 2 {
-            return Err(LexerError::InvalidNumber {
-                value,
-                line: start_pos.line,
-                column: start_pos.column,
-            });
+            return Err(LexerError::InvalidNumber(
+                InvalidNumberError::new(value, start_pos.line, start_pos.column, start_pos.offset)
+            ));
         }
         
         let end_pos = self.current_position();
@@ -310,11 +274,9 @@ impl Lexer {
         }
         
         if value.len() <= 2 {
-            return Err(LexerError::InvalidNumber {
-                value,
-                line: start_pos.line,
-                column: start_pos.column,
-            });
+            return Err(LexerError::InvalidNumber(
+                InvalidNumberError::new(value, start_pos.line, start_pos.column, start_pos.offset)
+            ));
         }
         
         let end_pos = self.current_position();
@@ -367,10 +329,9 @@ impl Lexer {
         }
 
         if self.current_char != Some('"') {
-            return Err(LexerError::UnterminatedString {
-                line: start_pos.line,
-                column: start_pos.column,
-            });
+            return Err(LexerError::UnterminatedString(
+                UnterminatedStringError::new(start_pos.line, start_pos.column, start_pos.offset)
+            ));
         }
 
         self.advance(); // 跳过结束引号
@@ -385,11 +346,9 @@ impl Lexer {
         self.advance(); // 跳过 'r'
         
         if self.current_char != Some('"') {
-            return Err(LexerError::UnexpectedCharacter {
-                ch: self.current_char.unwrap_or('\0'),
-                line: self.line,
-                column: self.column,
-            });
+            return Err(LexerError::InvalidCharacter(
+                InvalidCharacterError::new(self.current_char.unwrap_or('\0'), self.line, self.column, self.position)
+            ));
         }
         
         self.advance(); // 跳过开始引号
@@ -404,10 +363,9 @@ impl Lexer {
         }
 
         if self.current_char != Some('"') {
-            return Err(LexerError::UnterminatedString {
-                line: start_pos.line,
-                column: start_pos.column,
-            });
+            return Err(LexerError::UnterminatedString(
+                UnterminatedStringError::new(start_pos.line, start_pos.column, start_pos.offset)
+            ));
         }
 
         self.advance(); // 跳过结束引号
@@ -434,10 +392,9 @@ impl Lexer {
         }
 
         if self.current_char != Some('\'') {
-            return Err(LexerError::UnterminatedString {
-                line: start_pos.line,
-                column: start_pos.column,
-            });
+            return Err(LexerError::UnterminatedString(
+                UnterminatedStringError::new(start_pos.line, start_pos.column, start_pos.offset)
+            ));
         }
 
         self.advance(); // 跳过结束单引号
@@ -491,18 +448,14 @@ impl Lexer {
                 self.read_unicode_escape(line, column)
             }
             Some(ch) => {
-                Err(LexerError::InvalidEscapeSequence {
-                    sequence: format!("\\{}", ch),
-                    line,
-                    column,
-                })
+                Err(LexerError::InvalidEscapeSequence(
+                    InvalidEscapeSequenceError::new(format!("\\{}", ch), line, column, self.position)
+                ))
             }
             None => {
-                Err(LexerError::InvalidEscapeSequence {
-                    sequence: "\\".to_string(),
-                    line,
-                    column,
-                })
+                Err(LexerError::InvalidEscapeSequence(
+                    InvalidEscapeSequenceError::new("\\".to_string(), line, column, self.position)
+                ))
             }
         }
     }
@@ -517,29 +470,23 @@ impl Lexer {
                     hex.push(ch);
                     self.advance();
                 } else {
-                    return Err(LexerError::InvalidEscapeSequence {
-                        sequence: format!("\\x{}", hex),
-                        line,
-                        column,
-                    });
+                    return Err(LexerError::InvalidEscapeSequence(
+                        InvalidEscapeSequenceError::new(format!("\\x{}", hex), line, column, self.position)
+                    ));
                 }
             } else {
-                return Err(LexerError::InvalidEscapeSequence {
-                    sequence: format!("\\x{}", hex),
-                    line,
-                    column,
-                });
+                return Err(LexerError::InvalidEscapeSequence(
+                    InvalidEscapeSequenceError::new(format!("\\x{}", hex), line, column, self.position)
+                ));
             }
         }
         
         if let Ok(value) = u8::from_str_radix(&hex, 16) {
             Ok((value as char).to_string())
         } else {
-            Err(LexerError::InvalidEscapeSequence {
-                sequence: format!("\\x{}", hex),
-                line,
-                column,
-            })
+            Err(LexerError::InvalidEscapeSequence(
+                InvalidEscapeSequenceError::new(format!("\\x{}", hex), line, column, self.position)
+            ))
         }
     }
 
@@ -559,11 +506,9 @@ impl Lexer {
                     hex.push(ch);
                     self.advance();
                 } else {
-                    return Err(LexerError::InvalidUnicodeEscape {
-                        sequence: format!("\\u{{{}}}", hex),
-                        line,
-                        column,
-                    });
+                    return Err(LexerError::InvalidUnicodeEscape(
+                        InvalidUnicodeEscapeError::new(format!("\\u{{{}}}", hex), line, column, self.position)
+                    ));
                 }
             }
         } else {
@@ -574,28 +519,22 @@ impl Lexer {
                         hex.push(ch);
                         self.advance();
                     } else {
-                        return Err(LexerError::InvalidUnicodeEscape {
-                            sequence: format!("\\u{}", hex),
-                            line,
-                            column,
-                        });
+                        return Err(LexerError::InvalidUnicodeEscape(
+                            InvalidUnicodeEscapeError::new(format!("\\u{}", hex), line, column, self.position)
+                        ));
                     }
                 } else {
-                    return Err(LexerError::InvalidUnicodeEscape {
-                        sequence: format!("\\u{}", hex),
-                        line,
-                        column,
-                    });
+                    return Err(LexerError::InvalidUnicodeEscape(
+                        InvalidUnicodeEscapeError::new(format!("\\u{}", hex), line, column, self.position)
+                    ));
                 }
             }
         }
         
         if hex.is_empty() {
-            return Err(LexerError::InvalidUnicodeEscape {
-                sequence: "\\u{}".to_string(),
-                line,
-                column,
-            });
+            return Err(LexerError::InvalidUnicodeEscape(
+                InvalidUnicodeEscapeError::new("\\u{}".to_string(), line, column, self.position)
+            ));
         }
         
         if let Ok(code_point) = u32::from_str_radix(&hex, 16) {
@@ -604,15 +543,18 @@ impl Lexer {
             }
         }
         
-        Err(LexerError::InvalidUnicodeEscape {
-            sequence: if use_braces {
-                format!("\\u{{{}}}", hex)
-            } else {
-                format!("\\u{}", hex)
-            },
-            line,
-            column,
-        })
+        Err(LexerError::InvalidUnicodeEscape(
+            InvalidUnicodeEscapeError::new(
+                if use_braces {
+                    format!("\\u{{{}}}", hex)
+                } else {
+                    format!("\\u{}", hex)
+                },
+                line,
+                column,
+                self.position
+            )
+        ))
     }
 
     /// 获取下一个Token
