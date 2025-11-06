@@ -16,7 +16,7 @@ use compiler::Compiler;
 use vm::VM;
 use type_checker::TypeChecker;
 use bytecode::serializer::{BytecodeSerializer, BytecodeDeserializer};
-use error::ErrorMode;
+use error::{ErrorMode, ErrorDisplayer};
 use std::env;
 use std::fs;
 use std::fs::File;
@@ -96,7 +96,8 @@ fn compile_to_bytecode(source: &str, output_file: &str, error_mode: ErrorMode) {
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
         Err(err) => {
-            eprintln!("{}", err.format(error_mode, Some(source)));
+            let displayer = ErrorDisplayer::new(error_mode);
+            eprintln!("{}", displayer.format_error(&err, Some(source)));
             process::exit(1);
         }
     };
@@ -191,7 +192,8 @@ fn run(source: &str, error_mode: ErrorMode) {
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
         Err(err) => {
-            eprintln!("{}", err.format(error_mode, Some(source)));
+            let displayer = ErrorDisplayer::new(error_mode);
+            eprintln!("{}", displayer.format_error(&err, Some(source)));
             process::exit(1);
         }
     };
@@ -243,7 +245,8 @@ fn run_old(source: &str, error_mode: ErrorMode) {
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
         Err(err) => {
-            eprintln!("{}", err.format(error_mode, Some(source)));
+            let displayer = ErrorDisplayer::new(error_mode);
+            eprintln!("{}", displayer.format_error(&err, Some(source)));
             process::exit(1);
         }
     };
