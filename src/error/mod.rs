@@ -1,4 +1,4 @@
-//! Zero编译器错误处理系统 - 重构版
+//! Zero编译器错误处理系统
 //! 
 //! 这个模块提供了解耦的错误处理架构：
 //! 1. 错误定义（纯数据，enum）
@@ -196,10 +196,18 @@ impl ErrorRegistry {
         self.messages.get(key)
     }
     
-    /// 创建默认注册表（内嵌配置）
+    /// 创建默认注册表（从submodule加载配置）
     pub fn default() -> Self {
-        const DEFAULT_CONFIG: &str = include_str!("../../error_messages.toml");
-        Self::from_toml(DEFAULT_CONFIG).expect("Failed to load default error messages")
+        // 优先从submodule加载中文错误消息
+        const DEFAULT_CONFIG: &str = include_str!("../../error-msg/locale/zh_CN/error_messages.toml");
+        Self::from_toml(DEFAULT_CONFIG).expect("Failed to load error messages from submodule")
+    }
+    
+    /// 从指定语言加载错误消息
+    pub fn from_locale(locale: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let path = format!("error-msg/locale/{}/error_messages.toml", locale);
+        let config_str = std::fs::read_to_string(&path)?;
+        Self::from_toml(&config_str)
     }
 }
 

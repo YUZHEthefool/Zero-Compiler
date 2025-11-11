@@ -4,6 +4,8 @@
 
 Zero编译器实现了一个完善的两级错误处理机制，设计灵感来自Rust编译器的错误报告系统。
 
+错误消息配置使用Git Submodule管理，位于 `error-msg/` 目录，支持多语言国际化。
+
 ## 错误模式
 
 ### 1. 简易模式（Simple Mode）
@@ -252,39 +254,81 @@ cargo run --bin Zero-compiler examples/error_test.zero --dtl
 
 ### 添加新的错误类型
 
-1. 在 `src/error/mod.rs` 中定义新的错误结构：
+1. 在 `error-msg/locale/zh_CN/error_messages.toml` 中添加错误配置：
+
+```toml
+[lexer.L006]
+code = "L006"
+title = "你的新错误标题"
+description = "详细描述"
+suggestion = "修复建议"
+category = "lexer"
+```
+
+2. 在 `src/error/mod.rs` 中的 `ErrorType` 枚举添加新变体：
 
 ```rust
-#[derive(Debug, Clone)]
-pub struct YourNewError {
-    pub location: SourceLocation,
-    // 其他字段
-}
-
-impl CompilerError for YourNewError {
-    fn error_code(&self) -> &'static str {
-        "LXXX" // 或 "PXXX"
-    }
-    
-    fn title(&self) -> String {
-        "错误标题".to_string()
-    }
-    
-    fn description(&self) -> String {
-        "详细描述".to_string()
-    }
-    
-    fn suggestion(&self) -> Option<String> {
-        Some("修复建议".to_string())
-    }
-    
-    // 实现其他必需的方法
+pub enum ErrorType {
+    // ... 现有错误类型
+    LexerYourNewError,
 }
 ```
 
-2. 将新错误添加到相应的错误枚举（`LexerError` 或 `ParseError`）
+3. 实现 `code()` 和 `config_key()` 方法：
 
-3. 在词法分析器或语法分析器中使用新错误类型
+```rust
+impl ErrorType {
+    pub fn code(&self) -> &'static str {
+        match self {
+            // ...
+            Self::LexerYourNewError => "L006",
+        }
+    }
+    
+    pub fn config_key(&self) -> &'static str {
+        match self {
+            // ...
+            Self::LexerYourNewError => "lexer.L006",
+        }
+    }
+}
+```
+
+4. 添加便捷构造函数：
+
+```rust
+impl CompilerError {
+    pub fn your_new_error(line: usize, column: usize, offset: usize) -> Self {
+        Self::new(
+            "L006",
+            SourceLocation::single(line, column, offset),
+            ErrorType::LexerYourNewError,
+        )
+    }
+}
+```
+
+5. 在词法分析器或语法分析器中使用：
+
+```rust
+return Err(CompilerError::your_new_error(self.line, self.column, self.position));
+```
+
+### 添加新语言支持
+
+1. 在error-msg仓库创建新的语言目录：
+```bash
+cd error-msg
+mkdir -p locale/en_US
+cp locale/zh_CN/error_messages.toml locale/en_US/
+# 翻译 error_messages.toml 中的内容
+```
+
+2. 在代码中使用：
+```rust
+let registry = ErrorRegistry::from_locale("en_US")?;
+let displayer = ErrorDisplayer::new(error_mode).with_registry(registry);
+```
 
 ## 最佳实践
 
