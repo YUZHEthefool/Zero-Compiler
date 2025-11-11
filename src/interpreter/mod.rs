@@ -113,6 +113,17 @@ impl Interpreter {
 
     fn execute_statement(&mut self, stmt: &Stmt) -> RuntimeResult<Value> {
         match stmt {
+            Stmt::StructDeclaration { name: _, fields: _ } => {
+                // 结构体声明在解释器中不需要运行时操作
+                // 结构体信息由类型检查器管理
+                Ok(Value::Null)
+            }
+
+            Stmt::TypeAlias { name: _, target_type: _ } => {
+                // 类型别名在解释器中不需要运行时操作
+                Ok(Value::Null)
+            }
+
             Stmt::Expression(expr) => self.evaluate_expression(expr),
 
             Stmt::VarDeclaration {
@@ -232,6 +243,22 @@ impl Interpreter {
 
     fn evaluate_expression(&mut self, expr: &Expr) -> RuntimeResult<Value> {
         match expr {
+            Expr::StructLiteral { struct_name: _, fields: _ } => {
+                // TODO: 实现结构体字面量的解释执行
+                // 暂时返回占位值
+                Ok(Value::Null)
+            }
+
+            Expr::FieldAccess { object: _, field: _ } => {
+                // TODO: 实现字段访问的解释执行
+                Ok(Value::Null)
+            }
+
+            Expr::FieldAssign { object: _, field: _, value } => {
+                // TODO: 实现字段赋值的解释执行
+                self.evaluate_expression(value)
+            }
+
             Expr::Integer(i) => Ok(Value::Integer(*i)),
             Expr::Float(f) => Ok(Value::Float(*f)),
             Expr::String(s) => Ok(Value::String(s.clone())),

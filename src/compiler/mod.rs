@@ -67,6 +67,15 @@ impl Compiler {
                 self.emit(OpCode::Pop, 0);
             }
 
+            Stmt::StructDeclaration { name: _, fields: _ } => {
+                // 结构体声明在编译时处理，运行时不需要操作
+                // 类型信息由类型检查器管理
+            }
+
+            Stmt::TypeAlias { name: _, target_type: _ } => {
+                // 类型别名在编译时处理，运行时不需要操作
+            }
+
             Stmt::VarDeclaration { name, mutable, type_annotation: _, initializer } => {
                 if let Some(init) = initializer {
                     self.compile_expression(init)?;
@@ -236,6 +245,22 @@ impl Compiler {
     /// 编译表达式
     fn compile_expression(&mut self, expr: Expr) -> CompileResult<()> {
         match expr {
+            Expr::StructLiteral { struct_name: _, fields: _ } => {
+                // TODO: 实现结构体字面量的编译
+                // 暂时作为占位符处理
+                self.emit(OpCode::LoadNull, 0);
+            }
+
+            Expr::FieldAccess { object: _, field: _ } => {
+                // TODO: 实现字段访问的编译
+                self.emit(OpCode::LoadNull, 0);
+            }
+
+            Expr::FieldAssign { object: _, field: _, value } => {
+                // TODO: 实现字段赋值的编译
+                self.compile_expression(*value)?;
+            }
+
             Expr::Integer(n) => {
                 let idx = self.chunk.add_constant(Value::Integer(n));
                 self.emit(OpCode::LoadConst(idx), 0);

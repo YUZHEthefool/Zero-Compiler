@@ -50,6 +50,11 @@ pub enum OpCode {
     ArraySet,              // 设置数组元素 (array, index, value -> value)
     ArrayLen,              // 获取数组长度 (array -> length)
     
+    // 结构体操作
+    NewStruct(usize),      // 创建新结构体（参数：字段数量）
+    FieldGet(usize),       // 获取结构体字段 (struct, field_index -> value)
+    FieldSet(usize),       // 设置结构体字段 (struct, field_index, value -> value)
+    
     // 栈操作
     Pop,                   // 弹出栈顶
     Dup,                   // 复制栈顶
@@ -67,8 +72,16 @@ pub enum Value {
     String(String),
     Boolean(bool),
     Array(Vec<Value>),     // 数组值
+    Struct(StructValue),   // 结构体值
     Function(Function),
     Null,
+}
+
+/// 结构体值
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructValue {
+    pub struct_name: String,
+    pub fields: Vec<Value>,  // 按字段定义顺序存储
 }
 
 impl Value {
@@ -82,6 +95,9 @@ impl Value {
                 let elements: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
                 format!("[{}]", elements.join(", "))
             }
+            Value::Struct(s) => {
+                format!("{} {{ {} fields }}", s.struct_name, s.fields.len())
+            }
             Value::Function(_) => "<function>".to_string(),
             Value::Null => "null".to_string(),
         }
@@ -94,6 +110,7 @@ impl Value {
             Value::Integer(0) => false,
             Value::Float(f) if *f == 0.0 => false,
             Value::Array(arr) => !arr.is_empty(),
+            Value::Struct(_) => true,
             _ => true,
         }
     }
@@ -123,6 +140,20 @@ impl Value {
     pub fn as_array_mut(&mut self) -> Option<&mut Vec<Value>> {
         match self {
             Value::Array(arr) => Some(arr),
+            _ => None,
+        }
+    }
+    
+    pub fn as_struct(&self) -> Option<&StructValue> {
+        match self {
+            Value::Struct(s) => Some(s),
+            _ => None,
+        }
+    }
+    
+    pub fn as_struct_mut(&mut self) -> Option<&mut StructValue> {
+        match self {
+            Value::Struct(s) => Some(s),
             _ => None,
         }
     }
@@ -202,6 +233,9 @@ impl Chunk {
             OpCode::Loop(offset) => println!("Loop -> {}", offset),
             OpCode::Call(arity) => println!("Call({})", arity),
             OpCode::NewArray(size) => println!("NewArray({})", size),
+            OpCode::NewStruct(field_count) => println!("NewStruct({})", field_count),
+            OpCode::FieldGet(idx) => println!("FieldGet({})", idx),
+            OpCode::FieldSet(idx) => println!("FieldSet({})", idx),
             _ => println!("{:?}", op),
         }
     }

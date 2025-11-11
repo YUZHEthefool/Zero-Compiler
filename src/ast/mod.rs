@@ -11,7 +11,23 @@ pub enum Type {
     Null,
     Array(Box<Type>),  // 数组类型
     Function(FunctionType),
+    Struct(StructType),  // 结构体类型
+    Named(String),  // 类型别名引用
     Unknown,  // 用于类型推导
+}
+
+// 结构体字段定义
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StructField {
+    pub name: String,
+    pub field_type: Type,
+}
+
+// 结构体类型定义
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StructType {
+    pub name: String,
+    pub fields: Vec<StructField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -42,6 +58,8 @@ impl Type {
             (Type::Unknown, _) | (_, Type::Unknown) => true,
             // 数组类型需要元素类型兼容
             (Type::Array(a), Type::Array(b)) => a.is_compatible_with(b),
+            // 结构体类型需要名称和字段匹配
+            (Type::Struct(a), Type::Struct(b)) => a == b,
             _ => false,
         }
     }
@@ -66,6 +84,12 @@ pub enum Expr {
     // 数组字面量
     Array {
         elements: Vec<Expr>,
+    },
+    
+    // 结构体字面量
+    StructLiteral {
+        struct_name: String,
+        fields: Vec<(String, Expr)>,  // (字段名, 字段值)
     },
     
     // 二元运算
@@ -103,6 +127,19 @@ pub enum Expr {
     // 赋值
     Assign {
         name: String,
+        value: Box<Expr>,
+    },
+    
+    // 字段访问 (object.field)
+    FieldAccess {
+        object: Box<Expr>,
+        field: String,
+    },
+    
+    // 字段赋值
+    FieldAssign {
+        object: Box<Expr>,
+        field: String,
         value: Box<Expr>,
     },
 }
@@ -154,6 +191,18 @@ pub enum Stmt {
         parameters: Vec<Parameter>,
         return_type: Option<Type>,
         body: Vec<Stmt>,
+    },
+    
+    // 结构体声明
+    StructDeclaration {
+        name: String,
+        fields: Vec<StructField>,
+    },
+    
+    // 类型别名声明
+    TypeAlias {
+        name: String,
+        target_type: Type,
     },
     
     // 返回语句
@@ -282,6 +331,28 @@ impl Expr {
     pub fn assign(name: String, value: Expr) -> Self {
         Expr::Assign {
             name,
+            value: Box::new(value),
+        }
+    }
+    
+    pub fn struct_literal(struct_name: String, fields: Vec<(String, Expr)>) -> Self {
+        Expr::StructLiteral {
+            struct_name,
+            fields,
+        }
+    }
+    
+    pub fn field_access(object: Expr, field: String) -> Self {
+        Expr::FieldAccess {
+            object: Box::new(object),
+            field,
+        }
+    }
+    
+    pub fn field_assign(object: Expr, field: String, value: Expr) -> Self {
+        Expr::FieldAssign {
+            object: Box::new(object),
+            field,
             value: Box::new(value),
         }
     }

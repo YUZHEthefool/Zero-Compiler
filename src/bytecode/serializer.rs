@@ -69,6 +69,16 @@ impl BytecodeSerializer {
                 writer.write_all(&[0x06])?;
                 Self::write_function(func, writer)?;
             }
+            Value::Struct(s) => {
+                writer.write_all(&[0x08])?;
+                let name_bytes = s.struct_name.as_bytes();
+                writer.write_all(&(name_bytes.len() as u32).to_le_bytes())?;
+                writer.write_all(name_bytes)?;
+                writer.write_all(&(s.fields.len() as u32).to_le_bytes())?;
+                for field in &s.fields {
+                    Self::write_value(field, writer)?;
+                }
+            }
             Value::Null => {
                 writer.write_all(&[0x07])?;
             }
@@ -173,6 +183,18 @@ impl BytecodeSerializer {
             OpCode::ArrayGet => writer.write_all(&[0x61])?,
             OpCode::ArraySet => writer.write_all(&[0x62])?,
             OpCode::ArrayLen => writer.write_all(&[0x63])?,
+            OpCode::NewStruct(field_count) => {
+                writer.write_all(&[0x64])?;
+                writer.write_all(&(*field_count as u32).to_le_bytes())?;
+            }
+            OpCode::FieldGet(idx) => {
+                writer.write_all(&[0x65])?;
+                writer.write_all(&(*idx as u32).to_le_bytes())?;
+            }
+            OpCode::FieldSet(idx) => {
+                writer.write_all(&[0x66])?;
+                writer.write_all(&(*idx as u32).to_le_bytes())?;
+            }
             OpCode::Pop => writer.write_all(&[0x70])?,
             OpCode::Dup => writer.write_all(&[0x71])?,
             OpCode::Print => writer.write_all(&[0xF0])?,
@@ -278,6 +300,23 @@ impl BytecodeDeserializer {
             }
             0x06 => Ok(Value::Function(Self::read_function(reader)?)),
             0x07 => Ok(Value::Null),
+            0x08 => {
+                let name_len = Self::read_u32(reader)? as usize;
+                let mut name_bytes = vec![0u8; name_len];
+                reader.read_exact(&mut name_bytes)?;
+                let struct_name = String::from_utf8(name_bytes)
+                    .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
+                
+                let field_count = Self::read_u32(reader)? as usize;
+                let mut fields = Vec::with_capacity(field_count);
+                for _ in 0..field_count {
+                    fields.push(Self::read_value(reader)?);
+                }
+                Ok(Value::Struct(crate::bytecode::StructValue {
+                    struct_name,
+                    fields,
+                }))
+            }
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
                 format!("Unknown value type: 0x{:02X}", type_id[0]),
@@ -366,6 +405,9 @@ impl BytecodeDeserializer {
             0x61 => Ok(OpCode::ArrayGet),
             0x62 => Ok(OpCode::ArraySet),
             0x63 => Ok(OpCode::ArrayLen),
+            0x64 => Ok(OpCode::NewStruct(Self::read_u32(reader)? as usize)),
+            0x65 => Ok(OpCode::FieldGet(Self::read_u32(reader)? as usize)),
+            0x66 => Ok(OpCode::FieldSet(Self::read_u32(reader)? as usize)),
             0x70 => Ok(OpCode::Pop),
             0x71 => Ok(OpCode::Dup),
             0xF0 => Ok(OpCode::Print),

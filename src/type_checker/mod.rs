@@ -105,6 +105,22 @@ impl TypeChecker {
     /// 检查语句
     fn check_statement(&mut self, stmt: &Stmt) -> TypeResult<()> {
         match stmt {
+            Stmt::StructDeclaration { name, fields } => {
+                // 注册结构体类型
+                let struct_type = Type::Struct(crate::ast::StructType {
+                    name: name.clone(),
+                    fields: fields.clone(),
+                });
+                self.symbol_table.define(name.clone(), struct_type, false);
+                Ok(())
+            }
+
+            Stmt::TypeAlias { name, target_type } => {
+                // 注册类型别名
+                self.symbol_table.define(name.clone(), target_type.clone(), false);
+                Ok(())
+            }
+
             Stmt::Expression(expr) => {
                 self.infer_type(expr)?;
                 Ok(())
@@ -312,6 +328,61 @@ impl TypeChecker {
     /// 推断表达式类型
     fn infer_type(&mut self, expr: &Expr) -> TypeResult<Type> {
         match expr {
+            Expr::StructLiteral { struct_name, fields: _ } => {
+                // 查找结构体类型
+                if let Some(symbol) = self.symbol_table.get(struct_name) {
+                    Ok(symbol.symbol_type.clone())
+                } else {
+                    Err(TypeError::UndefinedVariable(struct_name.clone()))
+                }
+            }
+
+            Expr::FieldAccess { object, field } => {
+                let obj_type = self.infer_type(object)?;
+                match obj_type {
+                    Type::Struct(struct_type) => {
+                        for f in &struct_type.fields {
+                            if &f.name == field {
+                                return Ok(f.field_type.clone());
+                            }
+                        }
+                        Err(TypeError::UndefinedVariable(format!("Field {} not found", field)))
+                    }
+                    _ => Err(TypeError::InvalidOperation {
+                        operator: "field access".to_string(),
+                        left_type: obj_type,
+                        right_type: Type::Unknown,
+                    }),
+                }
+            }
+
+            Expr::FieldAssign { object, field, value } => {
+                let obj_type = self.infer_type(object)?;
+                let val_type = self.infer_type(value)?;
+                match obj_type {
+                    Type::Struct(struct_type) => {
+                        for f in &struct_type.fields {
+                            if &f.name == field {
+                                if !f.field_type.is_compatible_with(&val_type) && val_type != Type::Unknown {
+                                    return Err(TypeError::TypeMismatch {
+                                        expected: f.field_type.clone(),
+                                        found: val_type,
+                                        location: format!("field assignment to {}", field),
+                                    });
+                                }
+                                return Ok(val_type);
+                            }
+                        }
+                        Err(TypeError::UndefinedVariable(format!("Field {} not found", field)))
+                    }
+                    _ => Err(TypeError::InvalidOperation {
+                        operator: "field assignment".to_string(),
+                        left_type: obj_type,
+                        right_type: val_type,
+                    }),
+                }
+            }
+
             Expr::Integer(_) => Ok(Type::Int),
             Expr::Float(_) => Ok(Type::Float),
             Expr::String(_) => Ok(Type::String),

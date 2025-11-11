@@ -43,6 +43,14 @@ pub enum TokenType {
     True,
     False,
     Print,
+    Struct,      // struct关键字
+    Type,        // type关键字
+    Impl,        // impl关键字
+    Pub,         // pub关键字
+    Use,         // use关键字
+    Mod,         // mod关键字
+    Macro,       // macro关键字
+    Derive,      // derive关键字
     
     // 类型关键字
     Int,
@@ -118,6 +126,14 @@ impl TokenType {
             "true" => Some(TokenType::True),
             "false" => Some(TokenType::False),
             "print" => Some(TokenType::Print),
+            "struct" => Some(TokenType::Struct),
+            "type" => Some(TokenType::Type),
+            "impl" => Some(TokenType::Impl),
+            "pub" => Some(TokenType::Pub),
+            "use" => Some(TokenType::Use),
+            "mod" => Some(TokenType::Mod),
+            "macro" => Some(TokenType::Macro),
+            "derive" => Some(TokenType::Derive),
             // 类型关键字
             "int" => Some(TokenType::Int),
             "int64" => Some(TokenType::Int64),

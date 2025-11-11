@@ -416,6 +416,66 @@ impl VM {
                     }
                 }
 
+                // 结构体操作
+                OpCode::NewStruct(field_count) => {
+                    let mut fields = Vec::with_capacity(field_count);
+                    // 从栈中弹出字段值（注意顺序）
+                    for _ in 0..field_count {
+                        fields.push(self.pop()?);
+                    }
+                    // 反转以保持正确顺序
+                    fields.reverse();
+                    
+                    // 弹出结构体名称（应该在栈顶）
+                    let struct_name = match self.pop()? {
+                        Value::String(name) => name,
+                        _ => return Err(VMError::TypeError("Struct name must be a string".to_string())),
+                    };
+                    
+                    self.push(Value::Struct(crate::bytecode::StructValue {
+                        struct_name,
+                        fields,
+                    }))?;
+                }
+
+                OpCode::FieldGet(field_index) => {
+                    let struct_val = self.pop()?;
+                    
+                    match struct_val {
+                        Value::Struct(s) => {
+                            if field_index >= s.fields.len() {
+                                return Err(VMError::InvalidOperation(
+                                    format!("Field index {} out of bounds (struct has {} fields)",
+                                            field_index, s.fields.len())
+                                ));
+                            }
+                            self.push(s.fields[field_index].clone())?;
+                        }
+                        _ => return Err(VMError::TypeError("Can only access fields of structs".to_string())),
+                    }
+                }
+
+                OpCode::FieldSet(field_index) => {
+                    let value = self.pop()?;
+                    let struct_val = self.pop()?;
+                    
+                    match struct_val {
+                        Value::Struct(mut s) => {
+                            if field_index >= s.fields.len() {
+                                return Err(VMError::InvalidOperation(
+                                    format!("Field index {} out of bounds (struct has {} fields)",
+                                            field_index, s.fields.len())
+                                ));
+                            }
+                            
+                            s.fields[field_index] = value.clone();
+                            self.push(Value::Struct(s))?;
+                            self.push(value)?; // 返回被赋的值
+                        }
+                        _ => return Err(VMError::TypeError("Can only set fields of structs".to_string())),
+                    }
+                }
+
                 // 其他
                 OpCode::Print => {
                     let value = self.pop()?;
