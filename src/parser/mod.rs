@@ -259,9 +259,8 @@ impl Parser {
                 fields,
             })
         } else {
-            // 普通类型别名
-            let type_name_token = self.consume(TokenType::Identifier, "Expected type name")?;
-            Type::Named(type_name_token.value.clone())
+            // 普通类型别名 - 可以是基本类型或用户定义类型
+            self.parse_type()?
         };
         
         self.consume(TokenType::Semicolon, "Expected ';' after type alias")?;
