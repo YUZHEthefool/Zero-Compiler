@@ -33,6 +33,9 @@ pub enum TypeError {
         left_type: Type,
         right_type: Type,
     },
+    ImmutableAssignment {
+        variable: String,
+    },
 }
 
 type TypeResult<T> = Result<T, TypeError>;
@@ -94,6 +97,49 @@ impl TypeChecker {
         }
     }
 
+    /// 解析类型（将Named类型解析为实际类型）
+    fn resolve_type(&self, t: &Type) -> Type {
+        match t {
+            Type::Named(name) => {
+                // 查找符号表中的类型别名或结构体定义
+                if let Some(symbol) = self.symbol_table.get(name) {
+                    // 递归解析，防止链式别名
+                    self.resolve_type(&symbol.symbol_type)
+                } else {
+                    // 如果找不到定义，保持原样（后续会报错）
+                    t.clone()
+                }
+            }
+            Type::Array(element_type) => {
+                // 递归解析数组元素类型
+                Type::Array(Box::new(self.resolve_type(element_type)))
+            }
+            Type::Function(func_type) => {
+                // 递归解析函数参数和返回类型
+                let params = func_type.params.iter()
+                    .map(|p| self.resolve_type(p))
+                    .collect();
+                let return_type = Box::new(self.resolve_type(&func_type.return_type));
+                Type::Function(FunctionType { params, return_type })
+            }
+            Type::Struct(struct_type) => {
+                // 递归解析结构体字段类型
+                let fields = struct_type.fields.iter()
+                    .map(|f| crate::ast::StructField {
+                        name: f.name.clone(),
+                        field_type: self.resolve_type(&f.field_type),
+                    })
+                    .collect();
+                Type::Struct(crate::ast::StructType {
+                    name: struct_type.name.clone(),
+                    fields,
+                })
+            }
+            // 其他类型直接返回
+            _ => t.clone(),
+        }
+    }
+
     /// 检查程序
     pub fn check(&mut self, program: &Program) -> TypeResult<()> {
         for stmt in &program.statements {
@@ -139,17 +185,21 @@ impl TypeChecker {
                 };
 
                 let var_type = if let Some(annotated_type) = type_annotation {
+                    // 解析类型注解（处理类型别名）
+                    let resolved_annotated = self.resolve_type(annotated_type);
+                    let resolved_actual = self.resolve_type(&actual_type);
+
                     // 检查类型注解和初始化值是否匹配
                     if let Some(_init) = initializer {
-                        if !annotated_type.is_compatible_with(&actual_type) && actual_type != Type::Unknown {
+                        if !resolved_annotated.is_compatible_with(&resolved_actual) && resolved_actual != Type::Unknown {
                             return Err(TypeError::TypeMismatch {
-                                expected: annotated_type.clone(),
-                                found: actual_type,
+                                expected: resolved_annotated.clone(),
+                                found: resolved_actual,
                                 location: format!("variable declaration '{}'", name),
                             });
                         }
                     }
-                    annotated_type.clone()
+                    resolved_annotated
                 } else {
                     // 类型推导 - 如果无法推导则使用Unknown
                     actual_type
@@ -209,12 +259,15 @@ impl TypeChecker {
                 };
 
                 if let Some(expected_type) = &self.current_function_return_type {
-                    if expected_type != &Type::Unknown
-                        && return_type != Type::Unknown
-                        && !expected_type.is_compatible_with(&return_type) {
+                    let resolved_expected = self.resolve_type(expected_type);
+                    let resolved_return = self.resolve_type(&return_type);
+
+                    if resolved_expected != Type::Unknown
+                        && resolved_return != Type::Unknown
+                        && !resolved_expected.is_compatible_with(&resolved_return) {
                         return Err(TypeError::ReturnTypeMismatch {
-                            expected: expected_type.clone(),
-                            found: return_type,
+                            expected: resolved_expected,
+                            found: resolved_return,
                             function: "current function".to_string(),
                         });
                     }
@@ -363,10 +416,13 @@ impl TypeChecker {
                     Type::Struct(struct_type) => {
                         for f in &struct_type.fields {
                             if &f.name == field {
-                                if !f.field_type.is_compatible_with(&val_type) && val_type != Type::Unknown {
+                                let resolved_field = self.resolve_type(&f.field_type);
+                                let resolved_val = self.resolve_type(&val_type);
+
+                                if !resolved_field.is_compatible_with(&resolved_val) && resolved_val != Type::Unknown {
                                     return Err(TypeError::TypeMismatch {
-                                        expected: f.field_type.clone(),
-                                        found: val_type,
+                                        expected: resolved_field,
+                                        found: resolved_val,
                                         location: format!("field assignment to {}", field),
                                     });
                                 }
@@ -500,13 +556,23 @@ impl TypeChecker {
                 let value_type = self.infer_type(value)?;
 
                 if let Some(symbol) = self.symbol_table.get(name) {
+                    // 检查可变性
+                    if !symbol.is_mutable {
+                        return Err(TypeError::ImmutableAssignment {
+                            variable: name.clone(),
+                        });
+                    }
+
+                    let resolved_symbol = self.resolve_type(&symbol.symbol_type);
+                    let resolved_value = self.resolve_type(&value_type);
+
                     // 只有当类型都不是Unknown时才检查类型兼容性
-                    if symbol.symbol_type != Type::Unknown
-                        && value_type != Type::Unknown
-                        && !symbol.symbol_type.is_compatible_with(&value_type) {
+                    if resolved_symbol != Type::Unknown
+                        && resolved_value != Type::Unknown
+                        && !resolved_symbol.is_compatible_with(&resolved_value) {
                         return Err(TypeError::TypeMismatch {
-                            expected: symbol.symbol_type.clone(),
-                            found: value_type,
+                            expected: resolved_symbol,
+                            found: resolved_value,
                             location: format!("assignment to variable '{}'", name),
                         });
                     }
@@ -540,10 +606,13 @@ impl TypeChecker {
                                 params.iter().zip(arguments.iter()).enumerate()
                             {
                                 let arg_type = self.infer_type(arg)?;
-                                if !param_type.is_compatible_with(&arg_type) {
+                                let resolved_param = self.resolve_type(param_type);
+                                let resolved_arg = self.resolve_type(&arg_type);
+
+                                if !resolved_param.is_compatible_with(&resolved_arg) {
                                     return Err(TypeError::ArgumentTypeMismatch {
-                                        expected: param_type.clone(),
-                                        found: arg_type,
+                                        expected: resolved_param,
+                                        found: resolved_arg,
                                         argument: i + 1,
                                         function: func_name.clone(),
                                     });
@@ -632,10 +701,13 @@ impl TypeChecker {
                 
                 // 值类型必须与数组元素类型兼容
                 if let Some(element_type) = obj_type.get_element_type() {
-                    if !element_type.is_compatible_with(&val_type) && val_type != Type::Unknown {
+                    let resolved_element = self.resolve_type(element_type);
+                    let resolved_val = self.resolve_type(&val_type);
+
+                    if !resolved_element.is_compatible_with(&resolved_val) && resolved_val != Type::Unknown {
                         return Err(TypeError::TypeMismatch {
-                            expected: element_type.clone(),
-                            found: val_type,
+                            expected: resolved_element,
+                            found: resolved_val,
                             location: "array element assignment".to_string(),
                         });
                     }

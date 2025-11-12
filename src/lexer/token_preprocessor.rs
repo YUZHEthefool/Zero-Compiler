@@ -69,12 +69,26 @@ impl TokenPreprocessor {
         match token.token_type {
             TokenType::ScientificExponent => {
                 let inferred_type = ScientificNotationAnalyzer::analyze(&token.value);
-                let new_type = match inferred_type {
-                    InferredNumericType::Int64 => TokenType::Integer,
-                    InferredNumericType::Float64 => TokenType::Float,
+
+                // 计算科学计数法的实际值
+                let (new_type, new_value) = match inferred_type {
+                    InferredNumericType::Int64 => {
+                        // 将科学计数法转换为整数字符串
+                        if let Ok(float_val) = token.value.parse::<f64>() {
+                            let int_val = float_val as i64;
+                            (TokenType::Integer, int_val.to_string())
+                        } else {
+                            // 解析失败,默认为浮点数
+                            (TokenType::Float, token.value.clone())
+                        }
+                    }
+                    InferredNumericType::Float64 => {
+                        // 保持科学计数法字符串,因为f64::parse可以处理它
+                        (TokenType::Float, token.value.clone())
+                    }
                 };
-                
-                Token::new(new_type, token.value, token.start_pos, token.end_pos)
+
+                Token::new(new_type, new_value, token.start_pos, token.end_pos)
             }
             _ => token,
         }

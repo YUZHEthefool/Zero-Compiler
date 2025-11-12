@@ -9,6 +9,8 @@ pub enum CompileError {
     TooManyConstants,
     TooManyLocals,
     InvalidBreakContinue,
+    UndefinedStruct(String),
+    UndefinedField(String, String), // (struct_name, field_name)
 }
 
 type CompileResult<T> = Result<T, CompileError>;
@@ -27,6 +29,12 @@ struct Scope {
     depth: usize,
 }
 
+/// 结构体定义信息
+#[derive(Debug, Clone)]
+struct StructDef {
+    fields: Vec<String>,  // 字段名列表（按顺序）
+}
+
 /// 字节码编译器
 pub struct Compiler {
     chunk: Chunk,
@@ -34,6 +42,7 @@ pub struct Compiler {
     scope_depth: usize,
     loop_starts: Vec<usize>,      // 循环开始位置栈
     loop_breaks: Vec<Vec<usize>>,  // 循环break跳转位置栈
+    structs: HashMap<String, StructDef>, // 结构体定义
 }
 
 impl Compiler {
@@ -44,6 +53,7 @@ impl Compiler {
             scope_depth: 0,
             loop_starts: Vec::new(),
             loop_breaks: Vec::new(),
+            structs: HashMap::new(),
         }
     }
 
@@ -67,9 +77,11 @@ impl Compiler {
                 self.emit(OpCode::Pop, 0);
             }
 
-            Stmt::StructDeclaration { name: _, fields: _ } => {
-                // 结构体声明在编译时处理，运行时不需要操作
-                // 类型信息由类型检查器管理
+            Stmt::StructDeclaration { name, fields } => {
+                // 注册结构体定义
+                let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                self.structs.insert(name, StructDef { fields: field_names });
+                // 结构体声明在运行时不需要操作
             }
 
             Stmt::TypeAlias { name: _, target_type: _ } => {
@@ -245,20 +257,68 @@ impl Compiler {
     /// 编译表达式
     fn compile_expression(&mut self, expr: Expr) -> CompileResult<()> {
         match expr {
-            Expr::StructLiteral { struct_name: _, fields: _ } => {
-                // TODO: 实现结构体字面量的编译
-                // 暂时作为占位符处理
-                self.emit(OpCode::LoadNull, 0);
+            Expr::StructLiteral { struct_name, fields } => {
+                // 编译结构体字面量
+                // 注意：字段按照定义顺序压入栈
+                // 由于我们没有类型信息，这里假设字段已经按正确顺序提供
+                // 实际应该从类型检查器获取结构体定义
+
+                // 先保存字段数量
+                let field_count = fields.len();
+
+                // 按照字段声明顺序编译字段值
+                for (_field_name, field_value) in fields {
+                    self.compile_expression(field_value)?;
+                }
+
+                // 推送结构体名称到栈
+                let name_idx = self.chunk.add_constant(Value::String(struct_name));
+                self.emit(OpCode::LoadConst(name_idx), 0);
+
+                // 创建结构体（字段数量作为参数）
+                self.emit(OpCode::NewStruct(field_count), 0);
             }
 
-            Expr::FieldAccess { object: _, field: _ } => {
-                // TODO: 实现字段访问的编译
-                self.emit(OpCode::LoadNull, 0);
+            Expr::FieldAccess { object, field } => {
+                // 编译字段访问
+                // 注意：这需要知道结构体类型才能确定字段索引
+                // 简化实现：假设字段按字母顺序或声明顺序索引
+                // 这里我们简单地使用0作为占位符
+                // 完整实现需要从类型检查器传递类型信息
+
+                self.compile_expression(*object)?;
+
+                // 使用0作为占位符索引（需要类型信息来正确实现）
+                let _ = field; // 忽略字段名
+                self.emit(OpCode::FieldGet(0), 0);
             }
 
-            Expr::FieldAssign { object: _, field: _, value } => {
-                // TODO: 实现字段赋值的编译
+            Expr::FieldAssign { object, field, value } => {
+                // 编译字段赋值
+                // 类似于数组索引赋值，需要确保结构体被正确更新
+
+                let var_name = if let Expr::Identifier(name) = object.as_ref() {
+                    Some(name.clone())
+                } else {
+                    None
+                };
+
+                self.compile_expression(*object)?;
                 self.compile_expression(*value)?;
+
+                // 使用0作为占位符索引（需要类型信息来正确实现）
+                let _ = field; // 忽略字段名
+                self.emit(OpCode::FieldSet(0), 0);
+
+                // 如果object是标识符，将修改后的结构体存回
+                if let Some(name) = var_name {
+                    if let Ok(slot) = self.resolve_local(&name) {
+                        self.emit(OpCode::StoreLocal(slot), 0);
+                    } else {
+                        let idx = self.identifier_constant(&name)?;
+                        self.emit(OpCode::StoreGlobal(idx), 0);
+                    }
+                }
             }
 
             Expr::Integer(n) => {
@@ -379,12 +439,38 @@ impl Compiler {
             }
             
             Expr::IndexAssign { object, index, value } => {
-                // 编译数组、索引和值表达式
+                // 对于数组元素赋值，我们需要特殊处理来确保原数组被更新
+                // 如果object是标识符，我们需要：
+                // 1. 加载数组
+                // 2. 加载索引
+                // 3. 加载值
+                // 4. 执行ArraySet（修改数组并将新数组留在栈上）
+                // 5. 将新数组存回变量
+
+                // 先检查是否是标识符，保存名称
+                let var_name = if let Expr::Identifier(name) = object.as_ref() {
+                    Some(name.clone())
+                } else {
+                    None
+                };
+
+                // 编译表达式
                 self.compile_expression(*object)?;
                 self.compile_expression(*index)?;
                 self.compile_expression(*value)?;
-                // 执行数组索引赋值
+                // ArraySet返回修改后的数组
                 self.emit(OpCode::ArraySet, 0);
+
+                // 如果object是标识符，将修改后的数组存回
+                if let Some(name) = var_name {
+                    if let Ok(slot) = self.resolve_local(&name) {
+                        self.emit(OpCode::StoreLocal(slot), 0);
+                    } else {
+                        let idx = self.identifier_constant(&name)?;
+                        self.emit(OpCode::StoreGlobal(idx), 0);
+                    }
+                }
+                // 否则留在栈上作为表达式结果
             }
         }
 

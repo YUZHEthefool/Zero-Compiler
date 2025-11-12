@@ -90,7 +90,7 @@ fn read_source_file(filename: &str) -> String {
 /// 编译源代码到字节码文件
 fn compile_to_bytecode(source: &str, output_file: &str, error_mode: ErrorMode) {
     println!("Compiling {} to {}...", "source", output_file);
-    
+
     // 词法分析
     let mut lexer = Lexer::new(source.to_string());
     let tokens = match lexer.tokenize() {
@@ -101,6 +101,9 @@ fn compile_to_bytecode(source: &str, output_file: &str, error_mode: ErrorMode) {
             process::exit(1);
         }
     };
+
+    // 预处理tokens（处理科学计数法等）
+    let tokens = lexer::TokenPreprocessor::preprocess(tokens);
 
     // 语法分析
     let mut parser = Parser::new(tokens);
@@ -198,6 +201,9 @@ fn run(source: &str, error_mode: ErrorMode) {
         }
     };
 
+    // 预处理tokens（处理科学计数法等）
+    let tokens = lexer::TokenPreprocessor::preprocess(tokens);
+
     // 语法分析
     let mut parser = Parser::new(tokens);
     let program = match parser.parse() {
@@ -250,6 +256,9 @@ fn run_old(source: &str, error_mode: ErrorMode) {
             process::exit(1);
         }
     };
+
+    // 预处理tokens（处理科学计数法等）
+    let tokens = lexer::TokenPreprocessor::preprocess(tokens);
 
     // 语法分析
     let mut parser = Parser::new(tokens);
