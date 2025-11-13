@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, Stmt, BinaryOp, UnaryOp, Parameter};
+use crate::ast::{Expr, Program, Stmt, BinaryOp, UnaryOp, Parameter, Type, StructType};
 use crate::bytecode::{Chunk, OpCode, Value, Function};
 use std::collections::HashMap;
 
@@ -35,6 +35,13 @@ struct StructDef {
     fields: Vec<String>,  // 字段名列表（按顺序）
 }
 
+/// 局部变量的类型信息
+#[derive(Debug, Clone)]
+struct LocalTypeInfo {
+    name: String,
+    var_type: Type,
+}
+
 /// 字节码编译器
 pub struct Compiler {
     chunk: Chunk,
@@ -43,6 +50,8 @@ pub struct Compiler {
     loop_starts: Vec<usize>,      // 循环开始位置栈
     loop_breaks: Vec<Vec<usize>>,  // 循环break跳转位置栈
     structs: HashMap<String, StructDef>, // 结构体定义
+    local_types: Vec<LocalTypeInfo>, // 局部变量类型信息
+    global_types: HashMap<String, Type>, // 全局变量类型信息
 }
 
 impl Compiler {
@@ -54,6 +63,8 @@ impl Compiler {
             loop_starts: Vec::new(),
             loop_breaks: Vec::new(),
             structs: HashMap::new(),
+            local_types: Vec::new(),
+            global_types: HashMap::new(),
         }
     }
 
@@ -88,7 +99,16 @@ impl Compiler {
                 // 类型别名在编译时处理，运行时不需要操作
             }
 
-            Stmt::VarDeclaration { name, mutable, type_annotation: _, initializer } => {
+            Stmt::VarDeclaration { name, mutable, type_annotation, initializer } => {
+                // 推断变量类型
+                let var_type = if let Some(annotated) = type_annotation {
+                    annotated.clone()
+                } else if let Some(ref init) = initializer {
+                    self.infer_expression_type(init)
+                } else {
+                    Type::Null
+                };
+
                 if let Some(init) = initializer {
                     self.compile_expression(init)?;
                 } else {
@@ -100,9 +120,16 @@ impl Compiler {
                     let idx = self.identifier_constant(&name)?;
                     self.emit(OpCode::StoreGlobal(idx), 0);
                     self.emit(OpCode::Pop, 0);
+                    // 记录全局变量类型
+                    self.global_types.insert(name.clone(), var_type);
                 } else {
                     // 局部变量
-                    self.add_local(name, mutable)?;
+                    self.add_local(name.clone(), mutable)?;
+                    // 记录局部变量类型
+                    self.local_types.push(LocalTypeInfo {
+                        name: name.clone(),
+                        var_type,
+                    });
                 }
             }
 
@@ -249,6 +276,24 @@ impl Compiler {
                 }
                 self.end_scope();
             }
+
+            Stmt::Break => {
+                if self.loop_breaks.is_empty() {
+                    return Err(CompileError::InvalidBreakContinue);
+                }
+                let break_jump = self.emit_jump(OpCode::Jump(0));
+                if let Some(breaks) = self.loop_breaks.last_mut() {
+                    breaks.push(break_jump);
+                }
+            }
+
+            Stmt::Continue => {
+                if self.loop_starts.is_empty() {
+                    return Err(CompileError::InvalidBreakContinue);
+                }
+                let loop_start = *self.loop_starts.last().unwrap();
+                self.emit(OpCode::Loop(loop_start), 0);
+            }
         }
 
         Ok(())
@@ -258,17 +303,22 @@ impl Compiler {
     fn compile_expression(&mut self, expr: Expr) -> CompileResult<()> {
         match expr {
             Expr::StructLiteral { struct_name, fields } => {
-                // 编译结构体字面量
-                // 注意：字段按照定义顺序压入栈
-                // 由于我们没有类型信息，这里假设字段已经按正确顺序提供
-                // 实际应该从类型检查器获取结构体定义
+                // 获取结构体定义
+                let struct_def = self.structs.get(&struct_name).cloned()
+                    .ok_or_else(|| CompileError::UndefinedStruct(struct_name.clone()))?;
 
-                // 先保存字段数量
-                let field_count = fields.len();
+                // 按照结构体定义的字段顺序编译字段值
+                for defined_field in &struct_def.fields {
+                    // 查找用户提供的对应字段
+                    let field_value = fields.iter()
+                        .find(|(name, _)| name == defined_field)
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| CompileError::UndefinedField(
+                            struct_name.clone(),
+                            defined_field.clone()
+                        ))?;
 
-                // 按照字段声明顺序编译字段值
-                for (_field_name, field_value) in fields {
-                    self.compile_expression(field_value)?;
+                    self.compile_expression(field_value.clone())?;
                 }
 
                 // 推送结构体名称到栈
@@ -276,39 +326,55 @@ impl Compiler {
                 self.emit(OpCode::LoadConst(name_idx), 0);
 
                 // 创建结构体（字段数量作为参数）
-                self.emit(OpCode::NewStruct(field_count), 0);
+                self.emit(OpCode::NewStruct(struct_def.fields.len()), 0);
             }
 
             Expr::FieldAccess { object, field } => {
-                // 编译字段访问
-                // 注意：这需要知道结构体类型才能确定字段索引
-                // 简化实现：假设字段按字母顺序或声明顺序索引
-                // 这里我们简单地使用0作为占位符
-                // 完整实现需要从类型检查器传递类型信息
+                // 编译对象表达式
+                self.compile_expression(*object.clone())?;
 
-                self.compile_expression(*object)?;
+                // 推断对象类型并获取字段索引
+                let obj_type = self.infer_expression_type(&object);
 
-                // 使用0作为占位符索引（需要类型信息来正确实现）
-                let _ = field; // 忽略字段名
-                self.emit(OpCode::FieldGet(0), 0);
+                let field_index = match obj_type {
+                    Type::Struct(struct_type) => {
+                        // 从结构体类型中查找字段索引
+                        self.get_field_index(&struct_type, &field)
+                            .unwrap_or(0) // 如果找不到，使用 0 作为回退
+                    }
+                    _ => 0, // 非结构体类型，使用 0
+                };
+
+                // 使用实际的字段索引
+                self.emit(OpCode::FieldGet(field_index), 0);
             }
 
             Expr::FieldAssign { object, field, value } => {
                 // 编译字段赋值
-                // 类似于数组索引赋值，需要确保结构体被正确更新
-
                 let var_name = if let Expr::Identifier(name) = object.as_ref() {
                     Some(name.clone())
                 } else {
                     None
                 };
 
+                // 推断对象类型并获取字段索引
+                let obj_type = self.infer_expression_type(&object);
+
+                let field_index = match obj_type {
+                    Type::Struct(struct_type) => {
+                        // 从结构体类型中查找字段索引
+                        self.get_field_index(&struct_type, &field)
+                            .unwrap_or(0) // 如果找不到，使用 0 作为回退
+                    }
+                    _ => 0, // 非结构体类型，使用 0
+                };
+
+                // 编译对象和值
                 self.compile_expression(*object)?;
                 self.compile_expression(*value)?;
 
-                // 使用0作为占位符索引（需要类型信息来正确实现）
-                let _ = field; // 忽略字段名
-                self.emit(OpCode::FieldSet(0), 0);
+                // 使用实际的字段索引
+                self.emit(OpCode::FieldSet(field_index), 0);
 
                 // 如果object是标识符，将修改后的结构体存回
                 if let Some(name) = var_name {
@@ -338,6 +404,11 @@ impl Compiler {
 
             Expr::Boolean(b) => {
                 let idx = self.chunk.add_constant(Value::Boolean(b));
+                self.emit(OpCode::LoadConst(idx), 0);
+            }
+
+            Expr::Char(c) => {
+                let idx = self.chunk.add_constant(Value::Char(c));
                 self.emit(OpCode::LoadConst(idx), 0);
             }
 
@@ -563,16 +634,115 @@ impl Compiler {
 
     fn end_scope(&mut self) {
         self.scope_depth -= 1;
-        
+
         // 清理当前作用域的局部变量
-        while !self.locals.is_empty() 
-            && self.locals.last().unwrap().depth > self.scope_depth 
+        while !self.locals.is_empty()
+            && self.locals.last().unwrap().depth > self.scope_depth
         {
             self.emit(OpCode::Pop, 0);
             self.locals.pop();
         }
+
+        // 同时清理类型信息
+        while !self.local_types.is_empty()
+            && self.local_types.last().map(|lt| {
+                // 检查这个类型对应的局部变量是否还存在
+                !self.locals.iter().any(|l| l.name == lt.name)
+            }).unwrap_or(false)
+        {
+            self.local_types.pop();
+        }
+    }
+
+    /// 推断表达式的类型（用于编译时类型传播）
+    fn infer_expression_type(&self, expr: &Expr) -> Type {
+        match expr {
+            Expr::Integer(_) => Type::Int,
+            Expr::Float(_) => Type::Float,
+            Expr::String(_) => Type::String,
+            Expr::Boolean(_) => Type::Bool,
+            Expr::Char(_) => Type::Char,
+
+            Expr::Identifier(name) => {
+                // 先查找局部变量类型
+                for lt in self.local_types.iter().rev() {
+                    if &lt.name == name {
+                        return lt.var_type.clone();
+                    }
+                }
+                // 再查找全局变量类型
+                if let Some(t) = self.global_types.get(name) {
+                    return t.clone();
+                }
+                Type::Unknown
+            }
+
+            Expr::Array { elements } => {
+                if let Some(first) = elements.first() {
+                    let element_type = self.infer_expression_type(first);
+                    Type::Array(Box::new(element_type))
+                } else {
+                    Type::Array(Box::new(Type::Unknown))
+                }
+            }
+
+            Expr::StructLiteral { struct_name, .. } => {
+                // 从结构体定义查找类型
+                if let Some(struct_def) = self.structs.get(struct_name) {
+                    // 构建完整的 StructType
+                    let fields = struct_def.fields.iter().map(|name| {
+                        crate::ast::StructField {
+                            name: name.clone(),
+                            field_type: Type::Unknown, // 简化处理
+                        }
+                    }).collect();
+                    Type::Struct(StructType {
+                        name: struct_name.clone(),
+                        fields,
+                    })
+                } else {
+                    Type::Unknown
+                }
+            }
+
+            Expr::FieldAccess { object, field } => {
+                let obj_type = self.infer_expression_type(object);
+                match obj_type {
+                    Type::Struct(struct_type) => {
+                        for f in &struct_type.fields {
+                            if &f.name == field {
+                                return f.field_type.clone();
+                            }
+                        }
+                        Type::Unknown
+                    }
+                    _ => Type::Unknown,
+                }
+            }
+
+            Expr::Index { object, .. } => {
+                let obj_type = self.infer_expression_type(object);
+                match obj_type {
+                    Type::Array(element_type) => *element_type,
+                    _ => Type::Unknown,
+                }
+            }
+
+            Expr::Binary { .. } => Type::Unknown, // 简化处理
+            Expr::Unary { .. } => Type::Unknown,
+            Expr::Assign { .. } => Type::Unknown,
+            Expr::Call { .. } => Type::Unknown,
+            Expr::IndexAssign { .. } => Type::Unknown,
+            Expr::FieldAssign { .. } => Type::Unknown,
+        }
+    }
+
+    /// 根据结构体类型和字段名获取字段索引
+    fn get_field_index(&self, struct_type: &StructType, field_name: &str) -> Option<usize> {
+        struct_type.fields.iter().position(|f| f.name == field_name)
     }
 }
+
 
 impl Default for Compiler {
     fn default() -> Self {

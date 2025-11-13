@@ -7,6 +7,7 @@ pub enum Value {
     Float(f64),
     String(String),
     Boolean(bool),
+    Char(char),
     Function {
         parameters: Vec<Parameter>,
         body: Vec<Stmt>,
@@ -21,6 +22,7 @@ impl Value {
             Value::Float(f) => f.to_string(),
             Value::String(s) => s.clone(),
             Value::Boolean(b) => b.to_string(),
+            Value::Char(c) => c.to_string(),
             Value::Function { .. } => "<function>".to_string(),
             Value::Null => "null".to_string(),
         }
@@ -32,6 +34,7 @@ impl Value {
             Value::Null => false,
             Value::Integer(0) => false,
             Value::Float(f) if *f == 0.0 => false,
+            Value::Char('\0') => false,
             _ => true,
         }
     }
@@ -44,6 +47,8 @@ pub enum RuntimeError {
     DivisionByZero,
     InvalidOperation(String),
     ReturnValue(Value),
+    BreakSignal,
+    ContinueSignal,
 }
 
 type RuntimeResult<T> = Result<T, RuntimeError>;
@@ -185,8 +190,22 @@ impl Interpreter {
 
             Stmt::While { condition, body } => {
                 while self.evaluate_expression(condition)?.is_truthy() {
+                    let mut should_break = false;
                     for stmt in body {
-                        self.execute_statement(stmt)?;
+                        match self.execute_statement(stmt) {
+                            Err(RuntimeError::BreakSignal) => {
+                                should_break = true;
+                                break;
+                            }
+                            Err(RuntimeError::ContinueSignal) => {
+                                break;
+                            }
+                            Err(e) => return Err(e),
+                            Ok(_) => {}
+                        }
+                    }
+                    if should_break {
+                        break;
                     }
                 }
                 Ok(Value::Null)
@@ -204,12 +223,24 @@ impl Interpreter {
                 if let (Value::Integer(start_i), Value::Integer(end_i)) = (start_val, end_val) {
                     self.environment.push_scope();
 
-                    for i in start_i..end_i {
+                    'outer: for i in start_i..end_i {
                         self.environment
                             .define(variable.clone(), Value::Integer(i));
 
                         for stmt in body {
-                            self.execute_statement(stmt)?;
+                            match self.execute_statement(stmt) {
+                                Err(RuntimeError::BreakSignal) => {
+                                    break 'outer;
+                                }
+                                Err(RuntimeError::ContinueSignal) => {
+                                    break;
+                                }
+                                Err(e) => {
+                                    self.environment.pop_scope();
+                                    return Err(e);
+                                }
+                                Ok(_) => {}
+                            }
                         }
                     }
 
@@ -238,6 +269,14 @@ impl Interpreter {
                 self.environment.pop_scope();
                 Ok(Value::Null)
             }
+
+            Stmt::Break => {
+                Err(RuntimeError::BreakSignal)
+            }
+
+            Stmt::Continue => {
+                Err(RuntimeError::ContinueSignal)
+            }
         }
     }
 
@@ -263,6 +302,7 @@ impl Interpreter {
             Expr::Float(f) => Ok(Value::Float(*f)),
             Expr::String(s) => Ok(Value::String(s.clone())),
             Expr::Boolean(b) => Ok(Value::Boolean(*b)),
+            Expr::Char(c) => Ok(Value::Char(*c)),
             Expr::Identifier(name) => self.environment.get(name),
 
             Expr::Binary {

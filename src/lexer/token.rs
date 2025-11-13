@@ -40,6 +40,8 @@ pub enum TokenType {
     While,
     For,
     In,
+    Break,       // break关键字
+    Continue,    // continue关键字
     True,
     False,
     Print,
@@ -123,6 +125,8 @@ impl TokenType {
             "while" => Some(TokenType::While),
             "for" => Some(TokenType::For),
             "in" => Some(TokenType::In),
+            "break" => Some(TokenType::Break),
+            "continue" => Some(TokenType::Continue),
             "true" => Some(TokenType::True),
             "false" => Some(TokenType::False),
             "print" => Some(TokenType::Print),

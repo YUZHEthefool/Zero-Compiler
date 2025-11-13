@@ -7,6 +7,7 @@ pub enum Type {
     Float,
     String,
     Bool,
+    Char,    // 字符类型
     Void,
     Null,
     Array(Box<Type>),  // 数组类型
@@ -79,6 +80,7 @@ pub enum Expr {
     Float(f64),
     String(String),
     Boolean(bool),
+    Char(char),      // 字符字面量
     Identifier(String),
     
     // 数组字面量
@@ -240,6 +242,12 @@ pub enum Stmt {
     Block {
         statements: Vec<Stmt>,
     },
+
+    // Break 语句（仅在循环中有效）
+    Break,
+
+    // Continue 语句（仅在循环中有效）
+    Continue,
 }
 
 #[derive(Debug, Clone)]

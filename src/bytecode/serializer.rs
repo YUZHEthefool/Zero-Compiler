@@ -58,6 +58,13 @@ impl BytecodeSerializer {
                 writer.write_all(&[0x04])?;
                 writer.write_all(&[if *b { 1 } else { 0 }])?;
             }
+            Value::Char(c) => {
+                writer.write_all(&[0x09])?;
+                let mut buf = [0u8; 4];
+                let encoded = c.encode_utf8(&mut buf);
+                writer.write_all(&(encoded.len() as u8).to_le_bytes())?;
+                writer.write_all(encoded.as_bytes())?;
+            }
             Value::Array(arr) => {
                 writer.write_all(&[0x05])?;
                 writer.write_all(&(arr.len() as u32).to_le_bytes())?;
@@ -289,6 +296,16 @@ impl BytecodeDeserializer {
                 let mut byte = [0u8; 1];
                 reader.read_exact(&mut byte)?;
                 Ok(Value::Boolean(byte[0] != 0))
+            }
+            0x09 => {
+                let mut len_byte = [0u8; 1];
+                reader.read_exact(&mut len_byte)?;
+                let len = len_byte[0] as usize;
+                let mut bytes = vec![0u8; len];
+                reader.read_exact(&mut bytes)?;
+                let s = String::from_utf8(bytes)
+                    .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
+                Ok(Value::Char(s.chars().next().unwrap_or('\0')))
             }
             0x05 => {
                 let len = Self::read_u32(reader)? as usize;

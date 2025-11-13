@@ -36,6 +36,8 @@ pub enum TypeError {
     ImmutableAssignment {
         variable: String,
     },
+    BreakOutsideLoop,
+    ContinueOutsideLoop,
 }
 
 type TypeResult<T> = Result<T, TypeError>;
@@ -87,6 +89,7 @@ impl SymbolTable {
 pub struct TypeChecker {
     symbol_table: SymbolTable,
     current_function_return_type: Option<Type>,
+    loop_depth: usize,  // 追踪循环嵌套深度
 }
 
 impl TypeChecker {
@@ -94,6 +97,7 @@ impl TypeChecker {
         TypeChecker {
             symbol_table: SymbolTable::new(),
             current_function_return_type: None,
+            loop_depth: 0,
         }
     }
 
@@ -317,11 +321,13 @@ impl TypeChecker {
                     });
                 }
 
+                self.loop_depth += 1;
                 self.symbol_table.push_scope();
                 for stmt in body {
                     self.check_statement(stmt)?;
                 }
                 self.symbol_table.pop_scope();
+                self.loop_depth -= 1;
 
                 Ok(())
             }
@@ -351,6 +357,7 @@ impl TypeChecker {
                     });
                 }
 
+                self.loop_depth += 1;
                 self.symbol_table.push_scope();
                 self.symbol_table.define(variable.clone(), Type::Int, true);
 
@@ -359,6 +366,21 @@ impl TypeChecker {
                 }
 
                 self.symbol_table.pop_scope();
+                self.loop_depth -= 1;
+                Ok(())
+            }
+
+            Stmt::Break => {
+                if self.loop_depth == 0 {
+                    return Err(TypeError::BreakOutsideLoop);
+                }
+                Ok(())
+            }
+
+            Stmt::Continue => {
+                if self.loop_depth == 0 {
+                    return Err(TypeError::ContinueOutsideLoop);
+                }
                 Ok(())
             }
 
@@ -381,10 +403,47 @@ impl TypeChecker {
     /// 推断表达式类型
     fn infer_type(&mut self, expr: &Expr) -> TypeResult<Type> {
         match expr {
-            Expr::StructLiteral { struct_name, fields: _ } => {
+            Expr::StructLiteral { struct_name, fields } => {
                 // 查找结构体类型
                 if let Some(symbol) = self.symbol_table.get(struct_name) {
-                    Ok(symbol.symbol_type.clone())
+                    let struct_type = self.resolve_type(&symbol.symbol_type);
+
+                    // 验证字段
+                    if let Type::Struct(ref struct_def) = struct_type {
+                        // 检查字段数量
+                        if fields.len() != struct_def.fields.len() {
+                            return Err(TypeError::TypeMismatch {
+                                expected: struct_type.clone(),
+                                found: Type::Unknown,
+                                location: format!("struct {} requires {} fields, but {} provided",
+                                    struct_name, struct_def.fields.len(), fields.len()),
+                            });
+                        }
+
+                        // 检查每个字段的类型
+                        for (field_name, field_expr) in fields {
+                            let field_type = self.infer_type(field_expr)?;
+
+                            // 查找字段定义
+                            let field_def = struct_def.fields.iter().find(|f| &f.name == field_name);
+                            if let Some(def) = field_def {
+                                let expected_type = self.resolve_type(&def.field_type);
+                                if !field_type.is_compatible_with(&expected_type) {
+                                    return Err(TypeError::TypeMismatch {
+                                        expected: expected_type,
+                                        found: field_type,
+                                        location: format!("field {} in struct {}", field_name, struct_name),
+                                    });
+                                }
+                            } else {
+                                return Err(TypeError::UndefinedVariable(
+                                    format!("field {} not found in struct {}", field_name, struct_name)
+                                ));
+                            }
+                        }
+                    }
+
+                    Ok(struct_type)
                 } else {
                     Err(TypeError::UndefinedVariable(struct_name.clone()))
                 }
@@ -443,6 +502,7 @@ impl TypeChecker {
             Expr::Float(_) => Ok(Type::Float),
             Expr::String(_) => Ok(Type::String),
             Expr::Boolean(_) => Ok(Type::Bool),
+            Expr::Char(_) => Ok(Type::Char),
 
             Expr::Identifier(name) => {
                 if let Some(symbol) = self.symbol_table.get(name) {

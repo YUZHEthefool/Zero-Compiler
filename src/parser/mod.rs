@@ -337,6 +337,10 @@ impl Parser {
                 self.advance();
                 Ok(Type::Null)
             }
+            TokenType::Char => {
+                self.advance();
+                Ok(Type::Char)
+            }
             TokenType::Identifier => {
                 // 用户定义的类型（结构体名或类型别名）
                 let type_name = token.value.clone();
@@ -353,6 +357,10 @@ impl Parser {
     fn statement(&mut self) -> ParseResult<Stmt> {
         if self.match_token(&[TokenType::Return]) {
             self.return_statement()
+        } else if self.match_token(&[TokenType::Break]) {
+            self.break_statement()
+        } else if self.match_token(&[TokenType::Continue]) {
+            self.continue_statement()
         } else if self.match_token(&[TokenType::If]) {
             self.if_statement()
         } else if self.match_token(&[TokenType::While]) {
@@ -366,6 +374,16 @@ impl Parser {
         } else {
             self.expression_statement()
         }
+    }
+
+    fn break_statement(&mut self) -> ParseResult<Stmt> {
+        self.consume(TokenType::Semicolon, "Expected ';' after break")?;
+        Ok(Stmt::Break)
+    }
+
+    fn continue_statement(&mut self) -> ParseResult<Stmt> {
+        self.consume(TokenType::Semicolon, "Expected ';' after continue")?;
+        Ok(Stmt::Continue)
     }
 
     fn return_statement(&mut self) -> ParseResult<Stmt> {
@@ -504,6 +522,41 @@ impl Parser {
                 Expr::FieldAccess { object, field } => {
                     let value = self.assignment()?;
                     return Ok(Expr::field_assign(*object, field, value));
+                }
+                _ => {}
+            }
+        } else if self.match_token(&[TokenType::PlusEqual, TokenType::MinusEqual,
+                                      TokenType::StarEqual, TokenType::SlashEqual,
+                                      TokenType::PercentEqual]) {
+            // 获取运算符类型
+            let prev_token = self.tokens[self.current - 1].token_type.clone();
+            let op = match prev_token {
+                TokenType::PlusEqual => BinaryOp::Add,
+                TokenType::MinusEqual => BinaryOp::Subtract,
+                TokenType::StarEqual => BinaryOp::Multiply,
+                TokenType::SlashEqual => BinaryOp::Divide,
+                TokenType::PercentEqual => BinaryOp::Modulo,
+                _ => unreachable!(),
+            };
+
+            match expr.clone() {
+                Expr::Identifier(name) => {
+                    let value = self.assignment()?;
+                    // x += y 转换为 x = x + y
+                    let new_value = Expr::binary(expr, op, value);
+                    return Ok(Expr::assign(name, new_value));
+                }
+                Expr::Index { object, index } => {
+                    let value = self.assignment()?;
+                    // arr[i] += y 转换为 arr[i] = arr[i] + y
+                    let new_value = Expr::binary(expr, op, value);
+                    return Ok(Expr::index_assign(*object, *index, new_value));
+                }
+                Expr::FieldAccess { object, field } => {
+                    let value = self.assignment()?;
+                    // obj.field += y 转换为 obj.field = obj.field + y
+                    let new_value = Expr::binary(expr, op, value);
+                    return Ok(Expr::field_assign(*object, field, new_value));
                 }
                 _ => {}
             }
@@ -696,6 +749,18 @@ impl Parser {
             let value = self.tokens.get(self.current.saturating_sub(1))
                 .unwrap().value.clone();
             return Ok(Expr::string(value));
+        }
+
+        if self.match_token(&[TokenType::Char]) {
+            let value = self.tokens.get(self.current.saturating_sub(1))
+                .unwrap().value.clone();
+            // 解析字符字面量 (移除单引号)
+            let char_value = if value.len() >= 2 {
+                value.chars().nth(0).unwrap_or('\0')
+            } else {
+                '\0'
+            };
+            return Ok(Expr::Char(char_value));
         }
 
         if self.match_token(&[TokenType::Identifier]) {

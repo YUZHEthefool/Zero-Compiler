@@ -71,6 +71,7 @@ pub enum Value {
     Float(f64),
     String(String),
     Boolean(bool),
+    Char(char),            // 字符值
     Array(Vec<Value>),     // 数组值
     Struct(StructValue),   // 结构体值
     Function(Function),
@@ -91,6 +92,7 @@ impl Value {
             Value::Float(f) => f.to_string(),
             Value::String(s) => s.clone(),
             Value::Boolean(b) => b.to_string(),
+            Value::Char(c) => c.to_string(),
             Value::Array(arr) => {
                 let elements: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
                 format!("[{}]", elements.join(", "))
