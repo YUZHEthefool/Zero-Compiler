@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, Expr, Program, Stmt, UnaryOp, Type, Parameter};
+use crate::ast::{BinaryOp, Expr, Program, Stmt, UnaryOp, Type, Parameter, MethodDeclaration};
 use crate::lexer::token::{Token, TokenType, Position};
 
 pub struct Parser {
@@ -93,6 +93,8 @@ impl Parser {
             self.struct_declaration()
         } else if self.match_token(&[TokenType::Type]) {
             self.type_alias_declaration()
+        } else if self.match_token(&[TokenType::Impl]) {
+            self.impl_block()
         } else {
             self.statement()
         }
@@ -264,10 +266,96 @@ impl Parser {
         };
         
         self.consume(TokenType::Semicolon, "Expected ';' after type alias")?;
-        
+
         Ok(Stmt::TypeAlias { name, target_type })
     }
-    
+
+    fn impl_block(&mut self) -> ParseResult<Stmt> {
+        // impl TypeName { ... }
+        let type_token = self.consume(TokenType::Identifier, "Expected type name after 'impl'")?;
+        let type_name = type_token.value.clone();
+
+        self.consume(TokenType::LeftBrace, "Expected '{' after type name")?;
+
+        let mut methods = Vec::new();
+
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::EOF) {
+            // 解析方法 (跟函数类似，但有隐式的 self 参数)
+            self.consume(TokenType::Fn, "Expected 'fn' for method declaration")?;
+
+            let method_name_token = self.consume(TokenType::Identifier, "Expected method name")?;
+            let method_name = method_name_token.value.clone();
+
+            self.consume(TokenType::LeftParen, "Expected '(' after method name")?;
+
+            let mut parameters = Vec::new();
+
+            // 第一个参数应该是 self
+            if !self.check(TokenType::RightParen) {
+                let first_param = self.consume(TokenType::Identifier, "Expected parameter name")?;
+
+                if first_param.value == "self" {
+                    // self 参数不需要类型注解，会自动推断为当前类型
+                    // 继续解析后面的参数
+                    if self.match_token(&[TokenType::Comma]) {
+                        loop {
+                            let param_name = self.consume(TokenType::Identifier, "Expected parameter name")?;
+
+                            let type_annotation = if self.match_token(&[TokenType::Colon]) {
+                                Some(self.parse_type()?)
+                            } else {
+                                None
+                            };
+
+                            parameters.push(Parameter {
+                                name: param_name.value.clone(),
+                                type_annotation,
+                            });
+
+                            if !self.match_token(&[TokenType::Comma]) {
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    return Err(ParseError::UnexpectedToken {
+                        expected: "self".to_string(),
+                        found: TokenType::Identifier,
+                    });
+                }
+            }
+
+            self.consume(TokenType::RightParen, "Expected ')' after parameters")?;
+
+            // 解析可选的返回类型
+            let return_type = if self.match_token(&[TokenType::Arrow]) {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+
+            self.consume(TokenType::LeftBrace, "Expected '{' before method body")?;
+
+            let mut body = Vec::new();
+            while !self.check(TokenType::RightBrace) && !self.check(TokenType::EOF) {
+                body.push(self.declaration()?);
+            }
+
+            self.consume(TokenType::RightBrace, "Expected '}' after method body")?;
+
+            methods.push(MethodDeclaration {
+                name: method_name,
+                parameters,
+                return_type,
+                body,
+            });
+        }
+
+        self.consume(TokenType::RightBrace, "Expected '}' after impl block")?;
+
+        Ok(Stmt::ImplBlock { type_name, methods })
+    }
+
     fn parse_type(&mut self) -> ParseResult<Type> {
         // 检查数组类型 [element_type]
         if self.check(TokenType::LeftBracket) {
@@ -694,10 +782,17 @@ impl Parser {
                 self.consume(TokenType::RightBracket, "Expected ']' after index")?;
                 expr = Expr::index(expr, index);
             } else if self.match_token(&[TokenType::Dot]) {
-                // 字段访问
+                // 字段访问或方法调用
                 let field_token = self.consume(TokenType::Identifier, "Expected field name after '.'")?;
                 let field = field_token.value.clone();
-                expr = Expr::field_access(expr, field);
+
+                // 检查是否是方法调用 (后面跟着左括号)
+                if self.check(TokenType::LeftParen) {
+                    self.advance(); // 消费 '('
+                    expr = self.finish_method_call(expr, field)?;
+                } else {
+                    expr = Expr::field_access(expr, field);
+                }
             } else {
                 break;
             }
@@ -722,6 +817,24 @@ impl Parser {
         self.consume(TokenType::RightParen, "Expected ')' after arguments")?;
 
         Ok(Expr::call(callee, arguments))
+    }
+
+    fn finish_method_call(&mut self, object: Expr, method: String) -> ParseResult<Expr> {
+        let mut arguments = Vec::new();
+
+        if !self.check(TokenType::RightParen) {
+            loop {
+                arguments.push(self.expression()?);
+
+                if !self.match_token(&[TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RightParen, "Expected ')' after arguments")?;
+
+        Ok(Expr::method_call(object, method, arguments))
     }
 
     fn primary(&mut self) -> ParseResult<Expr> {

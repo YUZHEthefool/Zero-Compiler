@@ -137,12 +137,19 @@ pub enum Expr {
         object: Box<Expr>,
         field: String,
     },
-    
+
     // 字段赋值
     FieldAssign {
         object: Box<Expr>,
         field: String,
         value: Box<Expr>,
+    },
+
+    // 方法调用 (object.method(args))
+    MethodCall {
+        object: Box<Expr>,
+        method: String,
+        arguments: Vec<Expr>,
     },
 }
 
@@ -248,6 +255,21 @@ pub enum Stmt {
 
     // Continue 语句（仅在循环中有效）
     Continue,
+
+    // Impl 块（方法实现）
+    ImplBlock {
+        type_name: String,
+        methods: Vec<MethodDeclaration>,
+    },
+}
+
+/// 方法声明（与函数类似，但有隐式的 self 参数）
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodDeclaration {
+    pub name: String,
+    pub parameters: Vec<Parameter>,  // 不包含 self
+    pub return_type: Option<Type>,
+    pub body: Vec<Stmt>,
 }
 
 #[derive(Debug, Clone)]
@@ -362,6 +384,14 @@ impl Expr {
             object: Box::new(object),
             field,
             value: Box::new(value),
+        }
+    }
+
+    pub fn method_call(object: Expr, method: String, arguments: Vec<Expr>) -> Self {
+        Expr::MethodCall {
+            object: Box::new(object),
+            method,
+            arguments,
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, Stmt, BinaryOp, UnaryOp, Parameter, Type, StructType};
+use crate::ast::{Expr, Program, Stmt, BinaryOp, UnaryOp, Parameter, Type, StructType, MethodDeclaration};
 use crate::bytecode::{Chunk, OpCode, Value, Function};
 use std::collections::HashMap;
 
@@ -52,6 +52,7 @@ pub struct Compiler {
     structs: HashMap<String, StructDef>, // 结构体定义
     local_types: Vec<LocalTypeInfo>, // 局部变量类型信息
     global_types: HashMap<String, Type>, // 全局变量类型信息
+    methods: HashMap<String, HashMap<String, Function>>,  // type_name -> (method_name -> function)
 }
 
 impl Compiler {
@@ -65,6 +66,7 @@ impl Compiler {
             structs: HashMap::new(),
             local_types: Vec::new(),
             global_types: HashMap::new(),
+            methods: HashMap::new(),
         }
     }
 
@@ -97,6 +99,34 @@ impl Compiler {
 
             Stmt::TypeAlias { name: _, target_type: _ } => {
                 // 类型别名在编译时处理，运行时不需要操作
+            }
+
+            Stmt::ImplBlock { type_name, methods } => {
+                // 编译每个方法并存储到方法表中
+                let mut method_map = HashMap::new();
+
+                for method in methods {
+                    // 创建包含 self 参数的参数列表
+                    let mut params_with_self = vec![Parameter {
+                        name: "self".to_string(),
+                        type_annotation: Some(Type::Named(type_name.clone())),
+                    }];
+                    params_with_self.extend(method.parameters.clone());
+
+                    // 编译方法体（作为函数）
+                    let function = self.compile_function(
+                        format!("{}.{}", type_name, method.name),
+                        &params_with_self,
+                        method.body.clone()
+                    )?;
+
+                    method_map.insert(method.name.clone(), function);
+                }
+
+                // 存储方法到方法表
+                self.methods.insert(type_name.clone(), method_map);
+
+                // Impl块在运行时不需要额外操作
             }
 
             Stmt::VarDeclaration { name, mutable, type_annotation, initializer } => {
@@ -483,12 +513,51 @@ impl Compiler {
 
             Expr::Call { callee, arguments } => {
                 self.compile_expression(*callee)?;
-                
+
                 for arg in arguments.iter() {
                     self.compile_expression(arg.clone())?;
                 }
-                
+
                 self.emit(OpCode::Call(arguments.len()), 0);
+            }
+
+            Expr::MethodCall { object, method, arguments } => {
+                // 推断对象类型以确定方法所属的类型
+                let obj_type = self.infer_expression_type(&object);
+
+                let type_name = match obj_type {
+                    Type::Struct(struct_type) => struct_type.name.clone(),
+                    Type::Named(name) => name.clone(),
+                    _ => {
+                        return Err(CompileError::UndefinedVariable(
+                            format!("Cannot call method on type {:?}", obj_type)
+                        ));
+                    }
+                };
+
+                // 查找方法函数
+                let function = self.methods
+                    .get(&type_name)
+                    .and_then(|methods| methods.get(&method))
+                    .ok_or_else(|| CompileError::UndefinedVariable(
+                        format!("Method {} not found on type {}", method, type_name)
+                    ))?
+                    .clone();
+
+                // 将函数加载到栈
+                let func_idx = self.chunk.add_constant(Value::Function(function));
+                self.emit(OpCode::LoadConst(func_idx), 0);
+
+                // 编译 self 参数（对象）
+                self.compile_expression(*object)?;
+
+                // 编译其他参数
+                for arg in arguments.iter() {
+                    self.compile_expression(arg.clone())?;
+                }
+
+                // 调用方法（参数数量 = arguments.len() + 1 for self）
+                self.emit(OpCode::Call(arguments.len() + 1), 0);
             }
 
             Expr::Array { elements } => {
@@ -556,22 +625,27 @@ impl Compiler {
         body: Vec<Stmt>,
     ) -> CompileResult<Function> {
         let mut function_compiler = Compiler::new();
+
+        // 复制结构体定义和方法定义到新编译器
+        function_compiler.structs = self.structs.clone();
+        function_compiler.methods = self.methods.clone();
+
         function_compiler.begin_scope();
-        
+
         // 添加参数为局部变量
         for param in parameters {
             function_compiler.add_local(param.name.clone(), false)?;
         }
-        
+
         // 编译函数体
         for stmt in body {
             function_compiler.compile_statement(stmt)?;
         }
-        
+
         // 如果没有显式return，添加返回null
         function_compiler.emit(OpCode::LoadNull, 0);
         function_compiler.emit(OpCode::Return, 0);
-        
+
         Ok(Function {
             name,
             arity: parameters.len(),
@@ -667,12 +741,12 @@ impl Compiler {
                 // 先查找局部变量类型
                 for lt in self.local_types.iter().rev() {
                     if &lt.name == name {
-                        return lt.var_type.clone();
+                        return self.resolve_named_type(&lt.var_type);
                     }
                 }
                 // 再查找全局变量类型
                 if let Some(t) = self.global_types.get(name) {
-                    return t.clone();
+                    return self.resolve_named_type(t);
                 }
                 Type::Unknown
             }
@@ -732,8 +806,34 @@ impl Compiler {
             Expr::Unary { .. } => Type::Unknown,
             Expr::Assign { .. } => Type::Unknown,
             Expr::Call { .. } => Type::Unknown,
+            Expr::MethodCall { .. } => Type::Unknown,
             Expr::IndexAssign { .. } => Type::Unknown,
             Expr::FieldAssign { .. } => Type::Unknown,
+        }
+    }
+
+    /// 解析 Named 类型为实际的 Struct 类型
+    fn resolve_named_type(&self, t: &Type) -> Type {
+        match t {
+            Type::Named(name) => {
+                // 查找结构体定义
+                if let Some(struct_def) = self.structs.get(name) {
+                    let fields = struct_def.fields.iter().map(|field_name| {
+                        crate::ast::StructField {
+                            name: field_name.clone(),
+                            field_type: Type::Unknown, // 简化处理
+                        }
+                    }).collect();
+                    Type::Struct(StructType {
+                        name: name.clone(),
+                        fields,
+                    })
+                } else {
+                    // 如果找不到定义，保持 Named 类型
+                    t.clone()
+                }
+            }
+            _ => t.clone(),
         }
     }
 

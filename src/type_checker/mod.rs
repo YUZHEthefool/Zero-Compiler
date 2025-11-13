@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, Stmt, BinaryOp, UnaryOp, Type, Parameter, FunctionType};
+use crate::ast::{Expr, Program, Stmt, BinaryOp, UnaryOp, Type, Parameter, FunctionType, MethodDeclaration};
 use std::collections::HashMap;
 
 /// 类型检查错误
@@ -85,11 +85,19 @@ impl SymbolTable {
     }
 }
 
+/// 方法签名信息
+#[derive(Debug, Clone)]
+struct MethodSignature {
+    params: Vec<Type>,
+    return_type: Type,
+}
+
 /// 类型检查器
 pub struct TypeChecker {
     symbol_table: SymbolTable,
     current_function_return_type: Option<Type>,
     loop_depth: usize,  // 追踪循环嵌套深度
+    methods: HashMap<String, HashMap<String, MethodSignature>>,  // type_name -> (method_name -> signature)
 }
 
 impl TypeChecker {
@@ -98,6 +106,7 @@ impl TypeChecker {
             symbol_table: SymbolTable::new(),
             current_function_return_type: None,
             loop_depth: 0,
+            methods: HashMap::new(),
         }
     }
 
@@ -168,6 +177,62 @@ impl TypeChecker {
             Stmt::TypeAlias { name, target_type } => {
                 // 注册类型别名
                 self.symbol_table.define(name.clone(), target_type.clone(), false);
+                Ok(())
+            }
+
+            Stmt::ImplBlock { type_name, methods } => {
+                // 验证类型存在
+                if self.symbol_table.get(type_name).is_none() {
+                    return Err(TypeError::UndefinedVariable(format!("Type {} not found", type_name)));
+                }
+
+                // 注册所有方法
+                let mut method_map = HashMap::new();
+
+                for method in methods {
+                    // 构建方法签名（不包含 self 参数）
+                    let param_types: Vec<Type> = method.parameters
+                        .iter()
+                        .map(|p| p.type_annotation.clone().unwrap_or(Type::Unknown))
+                        .collect();
+
+                    let ret_type = method.return_type.clone().unwrap_or(Type::Void);
+
+                    method_map.insert(
+                        method.name.clone(),
+                        MethodSignature {
+                            params: param_types.clone(),
+                            return_type: ret_type.clone(),
+                        },
+                    );
+
+                    // 检查方法体
+                    self.symbol_table.push_scope();
+                    self.current_function_return_type = Some(ret_type);
+
+                    // 添加 self 参数到作用域
+                    if let Some(symbol) = self.symbol_table.get(type_name) {
+                        self.symbol_table.define("self".to_string(), symbol.symbol_type.clone(), false);
+                    }
+
+                    // 添加其他参数到作用域
+                    for param in &method.parameters {
+                        let param_type = param.type_annotation.clone().unwrap_or(Type::Unknown);
+                        self.symbol_table.define(param.name.clone(), param_type, false);
+                    }
+
+                    // 检查方法体
+                    for stmt in &method.body {
+                        self.check_statement(stmt)?;
+                    }
+
+                    self.symbol_table.pop_scope();
+                    self.current_function_return_type = None;
+                }
+
+                // 注册方法到方法表
+                self.methods.insert(type_name.clone(), method_map);
+
                 Ok(())
             }
 
@@ -698,6 +763,60 @@ impl TypeChecker {
                     // 对于非标识符调用（如高阶函数），返回Unknown
                     Ok(Type::Unknown)
                 }
+            }
+
+            Expr::MethodCall { object, method, arguments } => {
+                // 获取对象的类型
+                let obj_type = self.infer_type(object)?;
+                let obj_type = self.resolve_type(&obj_type);
+
+                // 根据对象类型查找方法
+                let type_name = match &obj_type {
+                    Type::Struct(struct_type) => struct_type.name.clone(),
+                    Type::Named(name) => name.clone(),
+                    _ => {
+                        return Err(TypeError::InvalidOperation {
+                            operator: "method call".to_string(),
+                            left_type: obj_type,
+                            right_type: Type::Unknown,
+                        });
+                    }
+                };
+
+                // 查找方法签名并克隆以避免借用冲突
+                let method_sig = self.methods
+                    .get(&type_name)
+                    .and_then(|type_methods| type_methods.get(method))
+                    .cloned()
+                    .ok_or_else(|| TypeError::UndefinedFunction(format!("Method {} not found on type {}", method, type_name)))?;
+
+                // 检查参数数量
+                if method_sig.params.len() != arguments.len() {
+                    return Err(TypeError::ArgumentCountMismatch {
+                        expected: method_sig.params.len(),
+                        found: arguments.len(),
+                        function: format!("{}.{}", type_name, method),
+                    });
+                }
+
+                // 检查每个参数的类型
+                for (i, (param_type, arg)) in method_sig.params.iter().zip(arguments.iter()).enumerate() {
+                    let arg_type = self.infer_type(arg)?;
+                    let resolved_param = self.resolve_type(param_type);
+                    let resolved_arg = self.resolve_type(&arg_type);
+
+                    if !resolved_param.is_compatible_with(&resolved_arg) && resolved_arg != Type::Unknown {
+                        return Err(TypeError::ArgumentTypeMismatch {
+                            expected: resolved_param,
+                            found: resolved_arg,
+                            argument: i + 1,
+                            function: format!("{}.{}", type_name, method),
+                        });
+                    }
+                }
+
+                // 返回方法的返回类型
+                Ok(method_sig.return_type.clone())
             }
 
             Expr::Array { elements } => {

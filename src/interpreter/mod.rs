@@ -277,6 +277,12 @@ impl Interpreter {
             Stmt::Continue => {
                 Err(RuntimeError::ContinueSignal)
             }
+
+            Stmt::ImplBlock { .. } => {
+                // Impl blocks are not supported in the legacy interpreter
+                // They are only used for the bytecode compiler
+                Ok(Value::Null)
+            }
         }
     }
 
@@ -296,6 +302,12 @@ impl Interpreter {
             Expr::FieldAssign { object: _, field: _, value } => {
                 // TODO: 实现字段赋值的解释执行
                 self.evaluate_expression(value)
+            }
+
+            Expr::MethodCall { .. } => {
+                // Method calls are not supported in the legacy interpreter
+                // They are only used for the bytecode compiler
+                Err(RuntimeError::InvalidOperation("Method calls not supported in legacy interpreter".to_string()))
             }
 
             Expr::Integer(i) => Ok(Value::Integer(*i)),
